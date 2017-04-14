@@ -4,17 +4,22 @@ import (
 	"bytes"
 	"fmt"
 	"reflect"
+	"unicode/utf8"
 
 	"github.com/pkg/errors"
 )
 
-const TYPE_NIL = '0'
-const TYPE_TRUE = 'T'
-const TYPE_FALSE = 'F'
-const TYPE_FIXNUM = 'i'
-const TYPE_ARRAY = '['
+const (
+	TYPE_NIL    = '0'
+	TYPE_TRUE   = 'T'
+	TYPE_FALSE  = 'F'
+	TYPE_FIXNUM = 'i'
+	TYPE_ARRAY  = '['
+	TYPE_SYMBOL = ':'
+)
 
 var magic = fmt.Sprintf("%c%c", 4, 8)
+var symbolType = reflect.TypeOf(Symbol(""))
 
 func Encode(val interface{}) ([]byte, error) {
 	b := new(bytes.Buffer)
@@ -35,8 +40,16 @@ func encodeVal(b *bytes.Buffer, val interface{}) error {
 		return encodeNil(b)
 	}
 
-	t := reflect.TypeOf(val)
-	switch t.Kind() {
+	v := reflect.ValueOf(val)
+
+	if v.Type().AssignableTo(symbolType) {
+		if err := encodeSym(b, val.(Symbol)); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	switch v.Kind() {
 	case reflect.Bool:
 		if err := encodeBool(b, val.(bool)); err != nil {
 			return err
@@ -102,6 +115,27 @@ func encodeSlice(b *bytes.Buffer, val interface{}) error {
 		if err := encodeVal(b, v.Index(i).Interface()); err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+func encodeSym(b *bytes.Buffer, val Symbol) error {
+	str := string(val)
+	if !utf8.ValidString(str) {
+		return fmt.Errorf("Symbol %s is not valid UTF-8", str)
+	}
+
+	if _, err := b.WriteRune(TYPE_SYMBOL); err != nil {
+		return err
+	}
+
+	if _, err := b.Write(encodeNum(len(str))); err != nil {
+		return err
+	}
+
+	if _, err := b.WriteString(str); err != nil {
+		return err
 	}
 
 	return nil

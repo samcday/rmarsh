@@ -30,28 +30,30 @@ func TestEncodeNil(t *testing.T) {
 	checkAgainstRuby(t, nil, "nil")
 }
 
-func TestEncodeFalse(t *testing.T) {
+func TestEncodeBools(t *testing.T) {
 	checkAgainstRuby(t, true, "true")
 	checkAgainstRuby(t, false, "false")
 }
 
-func TestEncodeUint(t *testing.T) {
+func TestEncodeSymbols(t *testing.T) {
+	checkAgainstRuby(t, Symbol("test"), ":test")
+}
+
+func TestEncodeInts(t *testing.T) {
 	checkAgainstRuby(t, 0, "0")
 	checkAgainstRuby(t, 0xDE, "222")
 	checkAgainstRuby(t, 0xDEAD, "57005")
 	checkAgainstRuby(t, 0xDEADBE, "14593470")
 	checkAgainstRuby(t, 0x3DEADBEE, "1038801902")
-}
 
-func TestEncodeInt(t *testing.T) {
 	checkAgainstRuby(t, -0xDE, "-222")
 	checkAgainstRuby(t, -0xDEAD, "-57005")
 	checkAgainstRuby(t, -0xDEADBE, "-14593470")
 	checkAgainstRuby(t, -0x3DEADBEE, "-1038801902")
 }
 
-func TestSlices(t *testing.T) {
+func TestEncodeSlices(t *testing.T) {
 	checkAgainstRuby(t, []int{}, "[]")
 	checkAgainstRuby(t, []int{123}, "[123]")
-	checkAgainstRuby(t, []interface{}{123, true, false, nil}, "[123, true, false, nil]")
+	checkAgainstRuby(t, []interface{}{123, true, false, nil, Symbol("test")}, "[123, true, false, nil, :test]")
 }
