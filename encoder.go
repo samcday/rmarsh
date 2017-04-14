@@ -18,10 +18,16 @@ const (
 	TYPE_SYMBOL = ':'
 	TYPE_STRING = '"'
 	TYPE_IVAR   = 'I'
+	TYPE_CLASS  = 'c'
+	TYPE_MODULE = 'm'
 )
 
-var magic = fmt.Sprintf("%c%c", 4, 8)
-var symbolType = reflect.TypeOf(Symbol(""))
+var (
+	magic      = fmt.Sprintf("%c%c", 4, 8)
+	symbolType = reflect.TypeOf(Symbol(""))
+	classType  = reflect.TypeOf(Class(""))
+	moduleType = reflect.TypeOf(Module(""))
+)
 
 func Encode(val interface{}) ([]byte, error) {
 	b := new(bytes.Buffer)
@@ -43,12 +49,14 @@ func encodeVal(b *bytes.Buffer, val interface{}) error {
 	}
 
 	v := reflect.ValueOf(val)
+	typ := v.Type()
 
-	if v.Type().AssignableTo(symbolType) {
-		if err := encodeSym(b, val.(Symbol)); err != nil {
-			return err
-		}
-		return nil
+	if typ.AssignableTo(symbolType) {
+		return encodeSym(b, val.(Symbol))
+	} else if typ.AssignableTo(classType) {
+		return encodeClass(b, val.(Class))
+	} else if typ.AssignableTo(moduleType) {
+		return encodeModule(b, val.(Module))
 	}
 
 	switch v.Kind() {
@@ -175,6 +183,36 @@ func encodeString(b *bytes.Buffer, str string) error {
 		return err
 	}
 
+	return nil
+}
+
+func encodeClass(b *bytes.Buffer, class Class) error {
+	str := string(class)
+
+	if _, err := b.WriteRune(TYPE_CLASS); err != nil {
+		return err
+	}
+	if _, err := b.Write(encodeNum(len(str))); err != nil {
+		return err
+	}
+	if _, err := b.WriteString(str); err != nil {
+		return err
+	}
+	return nil
+}
+
+func encodeModule(b *bytes.Buffer, module Module) error {
+	str := string(module)
+
+	if _, err := b.WriteRune(TYPE_MODULE); err != nil {
+		return err
+	}
+	if _, err := b.Write(encodeNum(len(str))); err != nil {
+		return err
+	}
+	if _, err := b.WriteString(str); err != nil {
+		return err
+	}
 	return nil
 }
 

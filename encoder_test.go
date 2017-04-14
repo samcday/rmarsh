@@ -56,6 +56,14 @@ func TestEncodeStrings(t *testing.T) {
 	checkAgainstRuby(t, "hi", "hi")
 }
 
+func TestEncodeClass(t *testing.T) {
+	checkAgainstRuby(t, Class("Gem::Version"), "Class<Gem::Version>")
+}
+
+func TestEncodeModule(t *testing.T) {
+	checkAgainstRuby(t, Module("Gem"), "Module<Gem>")
+}
+
 func TestEncodeSlices(t *testing.T) {
 	checkAgainstRuby(t, []int{}, "[]")
 	checkAgainstRuby(t, []int{123}, "[123]")
