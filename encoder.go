@@ -31,17 +31,16 @@ func Encode(val interface{}) ([]byte, error) {
 
 func encodeVal(b *bytes.Buffer, val interface{}) error {
 	if val == nil {
-		if err := encodeNil(b); err != nil {
-			return err
-		}
+		return encodeNil(b)
 	}
 
-	switch val := val.(type) {
-	case bool:
-		if err := encodeBool(b, val); err != nil {
+	t := reflect.TypeOf(val)
+	switch t.Kind() {
+	case reflect.Bool:
+		if err := encodeBool(b, val.(bool)); err != nil {
 			return err
 		}
-	case uint, uint8, uint16, uint32, uint64, int, int8, int16, int32, int64:
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		if err := encodeFixnum(b, val); err != nil {
 			return err
 		}
@@ -134,15 +133,16 @@ func encodeNumPos(num uint64) []byte {
 	}
 
 	if num <= 0xFFFF {
-		return []byte{2, byte(num >> 8 & 0xFF), byte(num & 0xFF)}
+		return []byte{2, byte(num & 0xFF), byte(num >> 8 & 0xFF)}
 	}
 
 	if num <= 0xFFFFFF {
-		return []byte{3, byte(num >> 16 & 0xFF), byte(num >> 8 & 0xFF), byte(num & 0xFF)}
+		return []byte{3, byte(num & 0xFF), byte(num >> 8 & 0xFF), byte(num >> 16 & 0xFF)}
 	}
 
 	if num <= 0x3FFFFFFF {
-		return []byte{4, byte(num >> 24 & 0xFF), byte(num >> 16 & 0xFF), byte(num >> 8 & 0xFF), byte(num & 0xFF)}
+		print(num >> 24 & 0xFF)
+		return []byte{4, byte(num & 0xFF), byte(num >> 8 & 0xFF), byte(num >> 16 & 0xFF), byte(num >> 24 & 0xFF)}
 	}
 
 	panic("Handling numbers larger than 0x3FFFFFFF is not supported yet")
