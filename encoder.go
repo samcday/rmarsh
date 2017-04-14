@@ -12,6 +12,7 @@ const TYPE_NIL = '0'
 const TYPE_TRUE = 'T'
 const TYPE_FALSE = 'F'
 const TYPE_FIXNUM = 'i'
+const TYPE_ARRAY = '['
 
 var magic = fmt.Sprintf("%c%c", 4, 8)
 
@@ -42,6 +43,10 @@ func encodeVal(b *bytes.Buffer, val interface{}) error {
 		}
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		if err := encodeFixnum(b, val); err != nil {
+			return err
+		}
+	case reflect.Slice, reflect.Array:
+		if err := encodeSlice(b, val); err != nil {
 			return err
 		}
 	default:
@@ -77,6 +82,26 @@ func encodeFixnum(b *bytes.Buffer, val interface{}) error {
 
 	if _, err := b.Write(encodeNum(val)); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func encodeSlice(b *bytes.Buffer, val interface{}) error {
+	if _, err := b.WriteRune(TYPE_ARRAY); err != nil {
+		return err
+	}
+
+	v := reflect.ValueOf(val)
+	len := v.Len()
+	if _, err := b.Write(encodeNum(len)); err != nil {
+		return nil
+	}
+
+	for i := 0; i < len; i++ {
+		if err := encodeVal(b, v.Index(i).Interface()); err != nil {
+			return err
+		}
 	}
 
 	return nil
