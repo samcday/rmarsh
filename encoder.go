@@ -141,7 +141,6 @@ func encodeNumPos(num uint64) []byte {
 	}
 
 	if num <= 0x3FFFFFFF {
-		print(num >> 24 & 0xFF)
 		return []byte{4, byte(num & 0xFF), byte(num >> 8 & 0xFF), byte(num >> 16 & 0xFF), byte(num >> 24 & 0xFF)}
 	}
 
