@@ -16,6 +16,8 @@ const (
 	TYPE_FIXNUM = 'i'
 	TYPE_ARRAY  = '['
 	TYPE_SYMBOL = ':'
+	TYPE_STRING = '"'
+	TYPE_IVAR   = 'I'
 )
 
 var magic = fmt.Sprintf("%c%c", 4, 8)
@@ -60,6 +62,10 @@ func encodeVal(b *bytes.Buffer, val interface{}) error {
 		}
 	case reflect.Slice, reflect.Array:
 		if err := encodeSlice(b, val); err != nil {
+			return err
+		}
+	case reflect.String:
+		if err := encodeString(b, val.(string)); err != nil {
 			return err
 		}
 	default:
@@ -135,6 +141,37 @@ func encodeSym(b *bytes.Buffer, val Symbol) error {
 	}
 
 	if _, err := b.WriteString(str); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// TODO: proper encoding support. We're just assuming UTF-8 here for now.
+func encodeString(b *bytes.Buffer, str string) error {
+	if _, err := b.WriteRune(TYPE_IVAR); err != nil {
+		return err
+	}
+
+	if _, err := b.WriteRune(TYPE_STRING); err != nil {
+		return err
+	}
+
+	if _, err := b.Write(encodeNum(len(str))); err != nil {
+		return err
+	}
+	if _, err := b.WriteString(str); err != nil {
+		return err
+	}
+
+	if _, err := b.Write(encodeNum(1)); err != nil {
+		return err
+	}
+
+	if err := encodeSym(b, Symbol("E")); err != nil {
+		return err
+	}
+	if err := encodeBool(b, true); err != nil {
 		return err
 	}
 

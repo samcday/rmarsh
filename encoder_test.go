@@ -52,8 +52,12 @@ func TestEncodeInts(t *testing.T) {
 	checkAgainstRuby(t, -0x3DEADBEE, "-1038801902")
 }
 
+func TestEncodeStrings(t *testing.T) {
+	checkAgainstRuby(t, "hi", "hi")
+}
+
 func TestEncodeSlices(t *testing.T) {
 	checkAgainstRuby(t, []int{}, "[]")
 	checkAgainstRuby(t, []int{123}, "[123]")
-	checkAgainstRuby(t, []interface{}{123, true, false, nil, Symbol("test")}, "[123, true, false, nil, :test]")
+	checkAgainstRuby(t, []interface{}{123, true, nil, Symbol("test"), "test"}, `[123, true, nil, :test, "test"]`)
 }
