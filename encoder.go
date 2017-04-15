@@ -99,42 +99,75 @@ func (enc *Encoder) val(val interface{}) error {
 	if typ.AssignableTo(symbolType) {
 		if isptr {
 			return enc.symbol(*val.(*Symbol))
+		} else {
+			return enc.symbol(val.(Symbol))
 		}
-		return enc.symbol(val.(Symbol))
 	} else if typ.AssignableTo(classType) {
 		if isptr {
 			return enc.class(*val.(*Class))
+		} else {
+			return enc.class(val.(Class))
 		}
-		return enc.class(val.(Class))
 	} else if typ.AssignableTo(moduleType) {
 		if isptr {
 			return enc.module(*val.(*Module))
+		} else {
+			return enc.module(val.(Module))
 		}
-		return enc.module(val.(Module))
 	} else if typ.AssignableTo(instanceType) {
 		if isptr {
 			return enc.instance(val.(*Instance))
+		} else {
+			i := val.(Instance)
+			return enc.instance(&i)
 		}
-		i := val.(Instance)
-		return enc.instance(&i)
 	} else if typ.AssignableTo(regexpType) {
-		return enc.regexp(val.(Regexp))
+		if isptr {
+			return enc.regexp(*val.(*Regexp))
+		} else {
+			return enc.regexp(val.(Regexp))
+		}
 	} else if typ.AssignableTo(rstringType) {
 		rstr := val.(RString)
 		return enc.string(rstr.Raw, rstr.Encoding)
 	}
 
-	switch v.Kind() {
+	kind := v.Kind()
+	if isptr {
+		kind = v.Elem().Kind()
+	}
+
+	switch kind {
 	case reflect.Bool:
-		return enc.bool(val.(bool))
+		if isptr {
+			return enc.bool(*val.(*bool))
+		} else {
+			return enc.bool(val.(bool))
+		}
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return enc.fixnum(val)
+		if isptr {
+			return enc.fixnum(v.Elem().Interface())
+		} else {
+			return enc.fixnum(val)
+		}
 	case reflect.Slice, reflect.Array:
-		return enc.slice(val)
+		if isptr {
+			return enc.slice(v.Elem())
+		} else {
+			return enc.slice(v)
+		}
 	case reflect.Map:
-		return enc.map_(v)
+		if isptr {
+			return enc.map_(v.Elem())
+		} else {
+			return enc.map_(v)
+		}
 	case reflect.String:
-		return enc.string(val.(string), "UTF-8")
+		if isptr {
+			return enc.string(*val.(*string), "UTF-8")
+		} else {
+			return enc.string(val.(string), "UTF-8")
+		}
 	default:
 		return fmt.Errorf("Don't know how to encode type %T", val)
 	}
@@ -171,12 +204,11 @@ func (enc *Encoder) fixnum(val interface{}) error {
 	return enc.write(encodeNum(val))
 }
 
-func (enc *Encoder) slice(val interface{}) error {
+func (enc *Encoder) slice(v reflect.Value) error {
 	if err := enc.typ(TYPE_ARRAY); err != nil {
 		return err
 	}
 
-	v := reflect.ValueOf(val)
 	len := v.Len()
 	if err := enc.write(encodeNum(len)); err != nil {
 		return nil

@@ -35,6 +35,10 @@ func TestEncodeNil(t *testing.T) {
 func TestEncodeBools(t *testing.T) {
 	checkAgainstRuby(t, true, "true")
 	checkAgainstRuby(t, false, "false")
+
+	// Ptrs
+	v := true
+	checkAgainstRuby(t, &v, "true")
 }
 
 func TestEncodeSymbols(t *testing.T) {
@@ -51,6 +55,10 @@ func TestEncodeSymbols(t *testing.T) {
 		Symbol("bar"),
 		Symbol("foo"),
 	}, "[:foo, :bar, :bar, :foo]")
+
+	// Ptr test
+	sym := Symbol("foo")
+	checkAgainstRuby(t, &sym, ":foo")
 }
 
 func TestEncodeInts(t *testing.T) {
@@ -64,28 +72,52 @@ func TestEncodeInts(t *testing.T) {
 	checkAgainstRuby(t, -0xDEAD, "-57005")
 	checkAgainstRuby(t, -0xDEADBE, "-14593470")
 	checkAgainstRuby(t, -0x3DEADBEE, "-1038801902")
+
+	// Ptrs
+	v := 123
+	checkAgainstRuby(t, &v, "123")
 }
 
 func TestEncodeStrings(t *testing.T) {
 	checkAgainstRuby(t, "hi", `"hi"`)
+
+	// Ptrs
+	v := "test"
+	checkAgainstRuby(t, &v, `"test"`)
 }
 
 func TestEncodeClass(t *testing.T) {
 	checkAgainstRuby(t, Class("Gem::Version"), "Gem::Version")
+
+	// Ptrs
+	v := Class("Gem::Version")
+	checkAgainstRuby(t, &v, "Gem::Version")
 }
 
 func TestEncodeModule(t *testing.T) {
 	checkAgainstRuby(t, Module("Gem"), "Gem")
+
+	// Ptrs
+	v := Module("Gem")
+	checkAgainstRuby(t, &v, "Gem")
 }
 
 func TestEncodeSlices(t *testing.T) {
 	checkAgainstRuby(t, []int{}, "[]")
 	checkAgainstRuby(t, []int{123}, "[123]")
 	checkAgainstRuby(t, []interface{}{123, true, nil, Symbol("test"), "test"}, `[123, true, nil, :test, "test"]`)
+
+	// Ptrs
+	v := []int{123}
+	checkAgainstRuby(t, &v, "[123]")
 }
 
 func TestEncodeMap(t *testing.T) {
 	checkAgainstRuby(t, map[string]int{"foo": 123, "bar": 321}, `{"bar"=>321, "foo"=>123}`)
+
+	// Ptrs
+	v := map[int]int{123: 321}
+	checkAgainstRuby(t, &v, `{123=>321}`)
 }
 
 func TestEncodeInstance(t *testing.T) {
@@ -112,4 +144,8 @@ func TestEncodeRegexp(t *testing.T) {
 		Expr:  "test",
 		Flags: REGEXP_MULTILINE | REGEXP_IGNORECASE,
 	}, `/test/mi`)
+
+	// Ptrs
+	v := Regexp{Expr: "test"}
+	checkAgainstRuby(t, &v, "/test/")
 }
