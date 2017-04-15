@@ -13,27 +13,6 @@ import (
 )
 
 const (
-	TYPE_NIL        = '0'
-	TYPE_TRUE       = 'T'
-	TYPE_FALSE      = 'F'
-	TYPE_FIXNUM     = 'i'
-	TYPE_BIGNUM     = 'l'
-	TYPE_FLOAT      = 'f'
-	TYPE_ARRAY      = '['
-	TYPE_HASH       = '{'
-	TYPE_SYMBOL     = ':'
-	TYPE_SYMLINK    = ';'
-	TYPE_STRING     = '"'
-	TYPE_REGEXP     = '/'
-	TYPE_IVAR       = 'I'
-	TYPE_CLASS      = 'c'
-	TYPE_MODULE     = 'm'
-	TYPE_OBJECT     = 'o'
-	TYPE_LINK       = '@'
-	TYPE_USRMARSHAL = 'U'
-)
-
-const (
 	encodeNumMin = -0x3FFFFFFF
 	encodeNumMax = +0x3FFFFFFF
 )
@@ -259,11 +238,7 @@ func (enc *Encoder) bignum(num *big.Int) error {
 	if sz > encodeNumMax {
 		return fmt.Errorf("Received a number so large that I can't even fit it into a Ruby bignum. Congrats, I think you just unlocked some kind of achievement.")
 	}
-	// math/big returns bytes in big-endian, but Ruby Marshal arbitrarily decided to store them as little-endian...
-	for i := len(b)/2 - 1; i >= 0; i-- {
-		opp := len(b) - 1 - i
-		b[i], b[opp] = b[opp], b[i]
-	}
+	reverseBytes(b)
 	if err := enc.write(encodeNum(sz)); err != nil {
 		return err
 	}
