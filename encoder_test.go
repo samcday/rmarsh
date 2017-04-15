@@ -3,6 +3,7 @@ package rubymarshal
 import (
 	"bytes"
 	"encoding/hex"
+	"math/big"
 	"os/exec"
 	"testing"
 )
@@ -76,6 +77,24 @@ func TestEncodeInts(t *testing.T) {
 	// Ptrs
 	v := 123
 	checkAgainstRuby(t, &v, "123")
+}
+
+func TestEncodeBigNums(t *testing.T) {
+	// Check that regular int64s larger than the fixnum encodable range become bignums.
+	checkAgainstRuby(t, int64(0xDEADCAFEBEEF), "244838016401135")
+
+	// Check that actual math.Big numbers encode properly too.
+	var huge1, huge2 big.Int
+	huge1.SetString("DEADCAFEBABEBEEFDEADCAFEBABEBEEF", 16)
+	huge2.SetString("-DEADCAFEBABEBEEFDEADCAFEBABEBEEF", 16)
+
+	checkAgainstRuby(t, huge1, "295990999649265874631894574770086133487")
+	checkAgainstRuby(t, huge2, "-295990999649265874631894574770086133487")
+
+	// And ptrs.
+	v := int64(0xDEADCAFEBEEF)
+	checkAgainstRuby(t, &v, "244838016401135")
+	checkAgainstRuby(t, &huge1, "295990999649265874631894574770086133487")
 }
 
 func TestEncodeFloats(t *testing.T) {

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"math"
+	"math/big"
 	"reflect"
 	"unicode/utf8"
 
@@ -15,6 +17,7 @@ const (
 	TYPE_TRUE       = 'T'
 	TYPE_FALSE      = 'F'
 	TYPE_FIXNUM     = 'i'
+	TYPE_BIGNUM     = 'l'
 	TYPE_FLOAT      = 'f'
 	TYPE_ARRAY      = '['
 	TYPE_HASH       = '{'
@@ -30,14 +33,22 @@ const (
 	TYPE_USRMARSHAL = 'U'
 )
 
+const (
+	encodeNumMin = -0x3FFFFFFF
+	encodeNumMax = +0x3FFFFFFF
+)
+
 var (
-	magic        = []byte{4, 8}
+	magic = []byte{4, 8}
+
 	symbolType   = reflect.TypeOf(Symbol(""))
 	classType    = reflect.TypeOf(Class(""))
 	moduleType   = reflect.TypeOf(Module(""))
 	instanceType = reflect.TypeOf(Instance{})
 	regexpType   = reflect.TypeOf(Regexp{})
 	rstringType  = reflect.TypeOf(RString{})
+
+	bigIntType = reflect.TypeOf(*big.NewInt(0))
 )
 
 // Encoder takes arbitrary Golang objects and writes them to a io.Writer in Ruby Marshal format.
@@ -129,8 +140,20 @@ func (enc *Encoder) val(val interface{}) error {
 			return enc.regexp(val.(Regexp))
 		}
 	} else if typ.AssignableTo(rstringType) {
-		rstr := val.(RString)
-		return enc.string(rstr.Raw, rstr.Encoding)
+		if isptr {
+			rstr := val.(*RString)
+			return enc.string(rstr.Raw, rstr.Encoding)
+		} else {
+			rstr := val.(RString)
+			return enc.string(rstr.Raw, rstr.Encoding)
+		}
+	} else if typ.AssignableTo(bigIntType) {
+		if isptr {
+			return enc.bignum(val.(*big.Int))
+		} else {
+			v := val.(big.Int)
+			return enc.bignum(&v)
+		}
 	}
 
 	kind := v.Kind()
@@ -147,9 +170,9 @@ func (enc *Encoder) val(val interface{}) error {
 		}
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		if isptr {
-			return enc.fixnum(v.Elem().Interface())
+			return enc.fixnum(v.Elem())
 		} else {
-			return enc.fixnum(val)
+			return enc.fixnum(v)
 		}
 	case reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128:
 		if isptr {
@@ -203,12 +226,48 @@ func (enc *Encoder) bool(val bool) error {
 	return enc.typ(TYPE_FALSE)
 }
 
-func (enc *Encoder) fixnum(val interface{}) error {
+func (enc *Encoder) fixnum(v reflect.Value) error {
+	ival := v.Int()
+	if ival < encodeNumMin || ival > encodeNumMax {
+		return enc.bignum(big.NewInt(ival))
+	}
+
 	if err := enc.typ(TYPE_FIXNUM); err != nil {
 		return err
 	}
 
-	return enc.write(encodeNum(val))
+	return enc.write(encodeNum(v.Interface()))
+}
+
+func (enc *Encoder) bignum(num *big.Int) error {
+	if err := enc.typ(TYPE_BIGNUM); err != nil {
+		return err
+	}
+
+	if num.Sign() > 0 {
+		if err := enc.write([]byte{'+'}); err != nil {
+			return err
+		}
+	} else {
+		if err := enc.write([]byte{'-'}); err != nil {
+			return err
+		}
+	}
+
+	b := num.Bytes()
+	sz := int64(math.Ceil(float64(len(b)) / 2))
+	if sz > encodeNumMax {
+		return fmt.Errorf("Received a number so large that I can't even fit it into a Ruby bignum. Congrats, I think you just unlocked some kind of achievement.")
+	}
+	// math/big returns bytes in big-endian, but Ruby Marshal arbitrarily decided to store them as little-endian...
+	for i := len(b)/2 - 1; i >= 0; i-- {
+		opp := len(b) - 1 - i
+		b[i], b[opp] = b[opp], b[i]
+	}
+	if err := enc.write(encodeNum(sz)); err != nil {
+		return err
+	}
+	return enc.write(b)
 }
 
 func (enc *Encoder) float(v reflect.Value) error {
@@ -486,11 +545,11 @@ func encodeNumPos(num uint64) []byte {
 		return []byte{3, byte(num & 0xFF), byte(num >> 8 & 0xFF), byte(num >> 16 & 0xFF)}
 	}
 
-	if num <= 0x3FFFFFFF {
+	if num <= encodeNumMax {
 		return []byte{4, byte(num & 0xFF), byte(num >> 8 & 0xFF), byte(num >> 16 & 0xFF), byte(num >> 24 & 0xFF)}
 	}
 
-	panic("Handling numbers larger than 0x3FFFFFFF is not supported yet")
+	panic(fmt.Sprintf("Cannot encode num %v - value too large", num))
 }
 
 func encodeNumNeg(num int64) []byte {
@@ -510,11 +569,11 @@ func encodeNumNeg(num int64) []byte {
 		return []byte{negbyte(-3), byte(num & 0xFF), byte(num >> 8 & 0xFF), byte(num >> 16 & 0xFF)}
 	}
 
-	if num >= -0x3FFFFFFF {
+	if num >= encodeNumMin {
 		return []byte{negbyte(-4), byte(num & 0xFF), byte(num >> 8 & 0xFF), byte(num >> 16 & 0xFF), byte(num >> 24 & 0xFF)}
 	}
 
-	panic("Dunno how to handle this")
+	panic(fmt.Sprintf("Cannot encode num %v - value too small", num))
 }
 
 func negbyte(num int32) byte {
