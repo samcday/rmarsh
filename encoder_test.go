@@ -69,3 +69,7 @@ func TestEncodeSlices(t *testing.T) {
 	checkAgainstRuby(t, []int{123}, "[123]")
 	checkAgainstRuby(t, []interface{}{123, true, nil, Symbol("test"), "test"}, `[123, true, nil, :test, "test"]`)
 }
+
+func TestEncodeMap(t *testing.T) {
+	checkAgainstRuby(t, map[string]int{"foo": 123, "bar": 321}, `{"foo"=>123, "bar"=>321}`)
+}

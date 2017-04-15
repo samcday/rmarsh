@@ -15,6 +15,7 @@ const (
 	TYPE_FALSE  = 'F'
 	TYPE_FIXNUM = 'i'
 	TYPE_ARRAY  = '['
+	TYPE_HASH   = '{'
 	TYPE_SYMBOL = ':'
 	TYPE_STRING = '"'
 	TYPE_IVAR   = 'I'
@@ -61,21 +62,15 @@ func encodeVal(b *bytes.Buffer, val interface{}) error {
 
 	switch v.Kind() {
 	case reflect.Bool:
-		if err := encodeBool(b, val.(bool)); err != nil {
-			return err
-		}
+		return encodeBool(b, val.(bool))
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		if err := encodeFixnum(b, val); err != nil {
-			return err
-		}
+		return encodeFixnum(b, val)
 	case reflect.Slice, reflect.Array:
-		if err := encodeSlice(b, val); err != nil {
-			return err
-		}
+		return encodeSlice(b, val)
+	case reflect.Map:
+		return encodeMap(b, v)
 	case reflect.String:
-		if err := encodeString(b, val.(string)); err != nil {
-			return err
-		}
+		return encodeString(b, val.(string))
 	default:
 		return fmt.Errorf("Don't know how to encode type %T", val)
 	}
@@ -212,6 +207,26 @@ func encodeModule(b *bytes.Buffer, module Module) error {
 	}
 	if _, err := b.WriteString(str); err != nil {
 		return err
+	}
+	return nil
+}
+
+func encodeMap(b *bytes.Buffer, v reflect.Value) error {
+	if _, err := b.WriteRune(TYPE_HASH); err != nil {
+		return err
+	}
+
+	keys := v.MapKeys()
+	if _, err := b.Write(encodeNum(len(keys))); err != nil {
+		return err
+	}
+	for _, k := range keys {
+		if err := encodeVal(b, k.Interface()); err != nil {
+			return err
+		}
+		if err := encodeVal(b, v.MapIndex(k).Interface()); err != nil {
+			return err
+		}
 	}
 	return nil
 }
