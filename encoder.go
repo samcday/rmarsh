@@ -19,6 +19,7 @@ const (
 	TYPE_HASH       = '{'
 	TYPE_SYMBOL     = ':'
 	TYPE_STRING     = '"'
+	TYPE_REGEXP     = '/'
 	TYPE_IVAR       = 'I'
 	TYPE_CLASS      = 'c'
 	TYPE_MODULE     = 'm'
@@ -32,6 +33,8 @@ var (
 	classType    = reflect.TypeOf(Class(""))
 	moduleType   = reflect.TypeOf(Module(""))
 	instanceType = reflect.TypeOf(Instance{})
+	regexpType   = reflect.TypeOf(Regexp{})
+	rstringType  = reflect.TypeOf(RString{})
 )
 
 // Encoder takes arbitrary Golang objects and writes them to a io.Writer in Ruby Marshal format.
@@ -91,6 +94,11 @@ func (enc *Encoder) val(val interface{}) error {
 		return enc.module(val.(Module))
 	} else if typ.AssignableTo(instanceType) {
 		return enc.instance(val.(Instance))
+	} else if typ.AssignableTo(regexpType) {
+		return enc.regexp(val.(Regexp))
+	} else if typ.AssignableTo(rstringType) {
+		rstr := val.(RString)
+		return enc.string(rstr.Raw, rstr.Encoding)
 	}
 
 	switch v.Kind() {
@@ -103,7 +111,7 @@ func (enc *Encoder) val(val interface{}) error {
 	case reflect.Map:
 		return enc.map_(v)
 	case reflect.String:
-		return enc.string(val.(string))
+		return enc.string(val.(string), "UTF-8")
 	default:
 		return fmt.Errorf("Don't know how to encode type %T", val)
 	}
@@ -177,29 +185,70 @@ func (enc *Encoder) symbol(val Symbol) error {
 	return enc.write([]byte(str))
 }
 
-// TODO: proper encoding support. We're just assuming UTF-8 here for now.
-func (enc *Encoder) string(str string) error {
+func (enc *Encoder) ivar(data func() error, vars map[Symbol]interface{}) error {
 	if err := enc.typ(TYPE_IVAR); err != nil {
 		return err
 	}
 
-	if err := enc.typ(TYPE_STRING); err != nil {
+	if err := data(); err != nil {
 		return err
 	}
 
-	if err := enc.rawstr(str); err != nil {
+	if err := enc.write(encodeNum(len(vars))); err != nil {
 		return err
 	}
 
-	if err := enc.write(encodeNum(1)); err != nil {
-		return err
+	for k, v := range vars {
+		if string(k) == "encoding" && reflect.TypeOf(v).Kind() == reflect.String {
+			encoding := v.(string)
+			// encoding instance var for UTF-8/ASCII are special cased.
+			if err := enc.symbol(Symbol("E")); err != nil {
+				return err
+			}
+			if err := enc.bool(encoding == "UTF-8"); err != nil {
+				return err
+			}
+		} else {
+			if err := enc.symbol(k); err != nil {
+				return err
+			}
+			if err := enc.val(v); err != nil {
+				return err
+			}
+		}
 	}
 
-	if err := enc.symbol(Symbol("E")); err != nil {
-		return err
+	return nil
+}
+
+func (enc *Encoder) string(str string, encoding string) error {
+	return enc.ivar(func() error {
+		if err := enc.typ(TYPE_STRING); err != nil {
+			return err
+		}
+		return enc.rawstr(str)
+	}, map[Symbol]interface{}{
+		Symbol("encoding"): encoding,
+	})
+}
+
+func (enc *Encoder) regexp(r Regexp) error {
+	encoding := r.Encoding
+	if encoding == "" {
+		encoding = "UTF-8"
 	}
 
-	return enc.bool(true)
+	return enc.ivar(func() error {
+		if err := enc.typ(TYPE_REGEXP); err != nil {
+			return err
+		}
+		if err := enc.rawstr(r.Expr); err != nil {
+			return err
+		}
+		return enc.write([]byte{r.Flags})
+	}, map[Symbol]interface{}{
+		Symbol("encoding"): encoding,
+	})
 }
 
 func (enc *Encoder) rawstr(str string) error {

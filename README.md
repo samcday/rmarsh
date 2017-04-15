@@ -47,6 +47,9 @@ $ go run test.go | ruby -e 'puts Marshal.load($stdin).inspect'
 {"SomeModule"=>Process, "AnInstance"=>#<Gem::Version "1.2.3">, "Test"=>[123, "hello!", :testsym], "SomeClass"=>File::Stat}
 ```
 
+### A note on strings
+
+When encoding, if we encounter raw Go `string` types, we'll assume they're UTF-8 encoded. If a specific encoding needs to be used, you should wrap the string in an `RString` and specify the specific character encoding used.
 
 ## TODO
 

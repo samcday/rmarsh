@@ -89,3 +89,10 @@ func TestEncodeInstance(t *testing.T) {
 		Data:           []string{"1.2.3"},
 	}, `#<Gem::Version "1.2.3">`)
 }
+
+func TestEncodeRegexp(t *testing.T) {
+	checkAgainstRuby(t, Regexp{
+		Expr:  "test",
+		Flags: REGEXP_MULTILINE | REGEXP_IGNORECASE,
+	}, `/test/mi`)
+}
