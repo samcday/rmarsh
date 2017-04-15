@@ -13,3 +13,14 @@ type Class string
 // Module represents a reference to a Ruby Module
 // https://ruby-doc.org/core-2.4.0/Module.html
 type Module string
+
+// Instance represents an instance of a Ruby class.
+// If the Instance is not user marshalled (runtime class has marshal_dump/marshal_load method)
+// then the InstanceVars are serialized as part of the instance.
+// Otherwise the Data value is serialized (and is what is passed in to marshal_load on Ruby side)
+type Instance struct {
+	Name           string
+	UserMarshalled bool
+	InstanceVars   map[string]interface{}
+	Data           interface{}
+}

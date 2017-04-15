@@ -10,24 +10,27 @@ import (
 )
 
 const (
-	TYPE_NIL    = '0'
-	TYPE_TRUE   = 'T'
-	TYPE_FALSE  = 'F'
-	TYPE_FIXNUM = 'i'
-	TYPE_ARRAY  = '['
-	TYPE_HASH   = '{'
-	TYPE_SYMBOL = ':'
-	TYPE_STRING = '"'
-	TYPE_IVAR   = 'I'
-	TYPE_CLASS  = 'c'
-	TYPE_MODULE = 'm'
+	TYPE_NIL        = '0'
+	TYPE_TRUE       = 'T'
+	TYPE_FALSE      = 'F'
+	TYPE_FIXNUM     = 'i'
+	TYPE_ARRAY      = '['
+	TYPE_HASH       = '{'
+	TYPE_SYMBOL     = ':'
+	TYPE_STRING     = '"'
+	TYPE_IVAR       = 'I'
+	TYPE_CLASS      = 'c'
+	TYPE_MODULE     = 'm'
+	TYPE_OBJECT     = 'o'
+	TYPE_USRMARSHAL = 'U'
 )
 
 var (
-	magic      = fmt.Sprintf("%c%c", 4, 8)
-	symbolType = reflect.TypeOf(Symbol(""))
-	classType  = reflect.TypeOf(Class(""))
-	moduleType = reflect.TypeOf(Module(""))
+	magic        = fmt.Sprintf("%c%c", 4, 8)
+	symbolType   = reflect.TypeOf(Symbol(""))
+	classType    = reflect.TypeOf(Class(""))
+	moduleType   = reflect.TypeOf(Module(""))
+	instanceType = reflect.TypeOf(Instance{})
 )
 
 func Encode(val interface{}) ([]byte, error) {
@@ -58,6 +61,8 @@ func encodeVal(b *bytes.Buffer, val interface{}) error {
 		return encodeClass(b, val.(Class))
 	} else if typ.AssignableTo(moduleType) {
 		return encodeModule(b, val.(Module))
+	} else if typ.AssignableTo(instanceType) {
+		return encodeInstance(b, val.(Instance))
 	}
 
 	switch v.Kind() {
@@ -228,6 +233,40 @@ func encodeMap(b *bytes.Buffer, v reflect.Value) error {
 			return err
 		}
 	}
+	return nil
+}
+
+func encodeInstance(b *bytes.Buffer, inst Instance) error {
+	if inst.UserMarshalled {
+		if _, err := b.WriteRune(TYPE_USRMARSHAL); err != nil {
+			return err
+		}
+		if err := encodeSym(b, Symbol(inst.Name)); err != nil {
+			return err
+		}
+		if err := encodeVal(b, inst.Data); err != nil {
+			return err
+		}
+	} else {
+		if _, err := b.WriteRune(TYPE_OBJECT); err != nil {
+			return err
+		}
+		if err := encodeSym(b, Symbol(inst.Name)); err != nil {
+			return err
+		}
+		if _, err := b.Write(encodeNum(len(inst.InstanceVars))); err != nil {
+			return err
+		}
+		for k, v := range inst.InstanceVars {
+			if err := encodeSym(b, Symbol(k)); err != nil {
+				return err
+			}
+			if err := encodeVal(b, v); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 

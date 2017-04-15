@@ -14,13 +14,14 @@ func checkAgainstRuby(t *testing.T, val interface{}, expected string) {
 
 	cmd := exec.Command("ruby", "test.rb")
 	cmd.Stdin = bytes.NewReader(b)
-	var out bytes.Buffer
-	cmd.Stdout = &out
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		t.Fatalf("Error checking Ruby: %s", err)
+		t.Fatalf("Error checking Ruby: %s\n%s", err, stderr.String())
 	}
 
-	result := out.String()
+	result := stdout.String()
 	if result != expected {
 		t.Errorf("Encoded %v (%T), Ruby saw %s, expected %q", val, val, result, expected)
 	}
@@ -53,15 +54,15 @@ func TestEncodeInts(t *testing.T) {
 }
 
 func TestEncodeStrings(t *testing.T) {
-	checkAgainstRuby(t, "hi", "hi")
+	checkAgainstRuby(t, "hi", `"hi"`)
 }
 
 func TestEncodeClass(t *testing.T) {
-	checkAgainstRuby(t, Class("Gem::Version"), "Class<Gem::Version>")
+	checkAgainstRuby(t, Class("Gem::Version"), "Gem::Version")
 }
 
 func TestEncodeModule(t *testing.T) {
-	checkAgainstRuby(t, Module("Gem"), "Module<Gem>")
+	checkAgainstRuby(t, Module("Gem"), "Gem")
 }
 
 func TestEncodeSlices(t *testing.T) {
@@ -71,5 +72,20 @@ func TestEncodeSlices(t *testing.T) {
 }
 
 func TestEncodeMap(t *testing.T) {
-	checkAgainstRuby(t, map[string]int{"foo": 123, "bar": 321}, `{"foo"=>123, "bar"=>321}`)
+	checkAgainstRuby(t, map[string]int{"foo": 123, "bar": 321}, `{"bar"=>321, "foo"=>123}`)
+}
+
+func TestEncodeInstance(t *testing.T) {
+	checkAgainstRuby(t, Instance{
+		Name: "Object",
+		InstanceVars: map[string]interface{}{
+			"@test": 123,
+		},
+	}, "#Object<:@test=123>")
+
+	checkAgainstRuby(t, Instance{
+		Name:           "Gem::Version",
+		UserMarshalled: true,
+		Data:           []string{"1.2.3"},
+	}, `#<Gem::Version "1.2.3">`)
 }
