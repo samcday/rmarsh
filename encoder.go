@@ -3,6 +3,7 @@ package rubymarshal
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"reflect"
 	"unicode/utf8"
 
@@ -26,56 +27,83 @@ const (
 )
 
 var (
-	magic        = fmt.Sprintf("%c%c", 4, 8)
+	magic        = []byte{4, 8}
 	symbolType   = reflect.TypeOf(Symbol(""))
 	classType    = reflect.TypeOf(Class(""))
 	moduleType   = reflect.TypeOf(Module(""))
 	instanceType = reflect.TypeOf(Instance{})
 )
 
+// Encoder takes arbitrary Golang objects and writes them to a io.Writer in Ruby Marshal format.
+type Encoder struct {
+	w   io.Writer
+	ctx encodingCtx
+}
+
+type encodingCtx struct {
+	symbolCache map[string]uint8
+}
+
+func NewEncoder(w io.Writer) *Encoder {
+	return &Encoder{w: w}
+}
+
+// Encode will create an Encoder, write the given value, and return the encoded byte array.
 func Encode(val interface{}) ([]byte, error) {
 	b := new(bytes.Buffer)
+	enc := NewEncoder(b)
 
-	if _, err := b.WriteString(magic); err != nil {
-		errors.Wrap(err, "Failed to write header")
-	}
-
-	if err := encodeVal(b, val); err != nil {
+	if err := enc.Encode(val); err != nil {
 		return nil, err
 	}
 
 	return b.Bytes(), nil
 }
 
-func encodeVal(b *bytes.Buffer, val interface{}) error {
+func (enc *Encoder) Encode(val interface{}) error {
+	// Setup a new encoding context for this encode run.
+	enc.ctx = encodingCtx{}
+
+	if _, err := enc.w.Write([]byte(magic)); err != nil {
+		errors.Wrap(err, "Failed to write Marshal 4.8 header")
+	}
+
+	if err := enc.val(val); err != nil {
+		return errors.Wrap(err, "Error while encoding to Ruby Marshal 4.8")
+	}
+
+	return nil
+}
+
+func (enc *Encoder) val(val interface{}) error {
 	if val == nil {
-		return encodeNil(b)
+		return enc.nil()
 	}
 
 	v := reflect.ValueOf(val)
 	typ := v.Type()
 
 	if typ.AssignableTo(symbolType) {
-		return encodeSym(b, val.(Symbol))
+		return enc.symbol(val.(Symbol))
 	} else if typ.AssignableTo(classType) {
-		return encodeClass(b, val.(Class))
+		return enc.class(val.(Class))
 	} else if typ.AssignableTo(moduleType) {
-		return encodeModule(b, val.(Module))
+		return enc.module(val.(Module))
 	} else if typ.AssignableTo(instanceType) {
-		return encodeInstance(b, val.(Instance))
+		return enc.instance(val.(Instance))
 	}
 
 	switch v.Kind() {
 	case reflect.Bool:
-		return encodeBool(b, val.(bool))
+		return enc.bool(val.(bool))
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return encodeFixnum(b, val)
+		return enc.fixnum(val)
 	case reflect.Slice, reflect.Array:
-		return encodeSlice(b, val)
+		return enc.slice(val)
 	case reflect.Map:
-		return encodeMap(b, v)
+		return enc.map_(v)
 	case reflect.String:
-		return encodeString(b, val.(string))
+		return enc.string(val.(string))
 	default:
 		return fmt.Errorf("Don't know how to encode type %T", val)
 	}
@@ -83,50 +111,48 @@ func encodeVal(b *bytes.Buffer, val interface{}) error {
 	return nil
 }
 
-func encodeNil(b *bytes.Buffer) error {
-	if _, err := b.WriteRune(TYPE_NIL); err != nil {
-		return errors.Wrap(err, "Failed to write nil value")
-	}
-	return nil
+func (enc *Encoder) write(b []byte) error {
+	_, err := enc.w.Write(b)
+	return err
 }
 
-func encodeBool(b *bytes.Buffer, val bool) error {
-	t := TYPE_FALSE
+func (enc *Encoder) typ(typ byte) error {
+	return enc.write([]byte{typ})
+}
+
+func (enc *Encoder) nil() error {
+	return enc.typ(TYPE_NIL)
+}
+
+func (enc *Encoder) bool(val bool) error {
 	if val == true {
-		t = TYPE_TRUE
+		return enc.typ(TYPE_TRUE)
 	}
 
-	if _, err := b.WriteRune(t); err != nil {
-		return errors.Wrap(err, "Failed to write bool value")
-	}
-	return nil
+	return enc.typ(TYPE_FALSE)
 }
 
-func encodeFixnum(b *bytes.Buffer, val interface{}) error {
-	if _, err := b.WriteRune(TYPE_FIXNUM); err != nil {
+func (enc *Encoder) fixnum(val interface{}) error {
+	if err := enc.typ(TYPE_FIXNUM); err != nil {
 		return err
 	}
 
-	if _, err := b.Write(encodeNum(val)); err != nil {
-		return err
-	}
-
-	return nil
+	return enc.write(encodeNum(val))
 }
 
-func encodeSlice(b *bytes.Buffer, val interface{}) error {
-	if _, err := b.WriteRune(TYPE_ARRAY); err != nil {
+func (enc *Encoder) slice(val interface{}) error {
+	if err := enc.typ(TYPE_ARRAY); err != nil {
 		return err
 	}
 
 	v := reflect.ValueOf(val)
 	len := v.Len()
-	if _, err := b.Write(encodeNum(len)); err != nil {
+	if err := enc.write(encodeNum(len)); err != nil {
 		return nil
 	}
 
 	for i := 0; i < len; i++ {
-		if err := encodeVal(b, v.Index(i).Interface()); err != nil {
+		if err := enc.val(v.Index(i).Interface()); err != nil {
 			return err
 		}
 	}
@@ -134,136 +160,116 @@ func encodeSlice(b *bytes.Buffer, val interface{}) error {
 	return nil
 }
 
-func encodeSym(b *bytes.Buffer, val Symbol) error {
+func (enc *Encoder) symbol(val Symbol) error {
 	str := string(val)
 	if !utf8.ValidString(str) {
 		return fmt.Errorf("Symbol %s is not valid UTF-8", str)
 	}
 
-	if _, err := b.WriteRune(TYPE_SYMBOL); err != nil {
+	if err := enc.typ(TYPE_SYMBOL); err != nil {
 		return err
 	}
 
-	if _, err := b.Write(encodeNum(len(str))); err != nil {
+	if err := enc.write(encodeNum(len(str))); err != nil {
 		return err
 	}
 
-	if _, err := b.WriteString(str); err != nil {
-		return err
-	}
-
-	return nil
+	return enc.write([]byte(str))
 }
 
 // TODO: proper encoding support. We're just assuming UTF-8 here for now.
-func encodeString(b *bytes.Buffer, str string) error {
-	if _, err := b.WriteRune(TYPE_IVAR); err != nil {
+func (enc *Encoder) string(str string) error {
+	if err := enc.typ(TYPE_IVAR); err != nil {
 		return err
 	}
 
-	if _, err := b.WriteRune(TYPE_STRING); err != nil {
+	if err := enc.typ(TYPE_STRING); err != nil {
 		return err
 	}
 
-	if _, err := b.Write(encodeNum(len(str))); err != nil {
-		return err
-	}
-	if _, err := b.WriteString(str); err != nil {
+	if err := enc.rawstr(str); err != nil {
 		return err
 	}
 
-	if _, err := b.Write(encodeNum(1)); err != nil {
+	if err := enc.write(encodeNum(1)); err != nil {
 		return err
 	}
 
-	if err := encodeSym(b, Symbol("E")); err != nil {
-		return err
-	}
-	if err := encodeBool(b, true); err != nil {
+	if err := enc.symbol(Symbol("E")); err != nil {
 		return err
 	}
 
-	return nil
+	return enc.bool(true)
 }
 
-func encodeClass(b *bytes.Buffer, class Class) error {
-	str := string(class)
-
-	if _, err := b.WriteRune(TYPE_CLASS); err != nil {
+func (enc *Encoder) rawstr(str string) error {
+	if err := enc.write(encodeNum(len(str))); err != nil {
 		return err
 	}
-	if _, err := b.Write(encodeNum(len(str))); err != nil {
-		return err
-	}
-	if _, err := b.WriteString(str); err != nil {
-		return err
-	}
-	return nil
+	return enc.write([]byte(str))
 }
 
-func encodeModule(b *bytes.Buffer, module Module) error {
-	str := string(module)
-
-	if _, err := b.WriteRune(TYPE_MODULE); err != nil {
+func (enc *Encoder) class(c Class) error {
+	if err := enc.typ(TYPE_CLASS); err != nil {
 		return err
 	}
-	if _, err := b.Write(encodeNum(len(str))); err != nil {
-		return err
-	}
-	if _, err := b.WriteString(str); err != nil {
-		return err
-	}
-	return nil
+	return enc.rawstr(string(c))
 }
 
-func encodeMap(b *bytes.Buffer, v reflect.Value) error {
-	if _, err := b.WriteRune(TYPE_HASH); err != nil {
+func (enc *Encoder) module(m Module) error {
+	if err := enc.typ(TYPE_MODULE); err != nil {
+		return err
+	}
+	return enc.rawstr(string(m))
+}
+
+func (enc *Encoder) map_(v reflect.Value) error {
+	if err := enc.typ(TYPE_HASH); err != nil {
 		return err
 	}
 
 	keys := v.MapKeys()
-	if _, err := b.Write(encodeNum(len(keys))); err != nil {
+	if err := enc.write(encodeNum(len(keys))); err != nil {
 		return err
 	}
 	for _, k := range keys {
-		if err := encodeVal(b, k.Interface()); err != nil {
+		if err := enc.val(k.Interface()); err != nil {
 			return err
 		}
-		if err := encodeVal(b, v.MapIndex(k).Interface()); err != nil {
+		if err := enc.val(v.MapIndex(k).Interface()); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func encodeInstance(b *bytes.Buffer, inst Instance) error {
-	if inst.UserMarshalled {
-		if _, err := b.WriteRune(TYPE_USRMARSHAL); err != nil {
+func (enc *Encoder) instance(i Instance) error {
+	// Instances with user marshalling are encoded differently.
+	if i.UserMarshalled {
+		if err := enc.typ(TYPE_USRMARSHAL); err != nil {
 			return err
 		}
-		if err := encodeSym(b, Symbol(inst.Name)); err != nil {
+		if err := enc.symbol(Symbol(i.Name)); err != nil {
 			return err
 		}
-		if err := encodeVal(b, inst.Data); err != nil {
+		return enc.val(i.Data)
+	}
+
+	if err := enc.typ(TYPE_OBJECT); err != nil {
+		return err
+	}
+	if err := enc.symbol(Symbol(i.Name)); err != nil {
+		return err
+	}
+	if err := enc.write(encodeNum(len(i.InstanceVars))); err != nil {
+		return err
+	}
+	for k, v := range i.InstanceVars {
+		if err := enc.symbol(Symbol(k)); err != nil {
 			return err
 		}
-	} else {
-		if _, err := b.WriteRune(TYPE_OBJECT); err != nil {
+		if err := enc.val(v); err != nil {
 			return err
-		}
-		if err := encodeSym(b, Symbol(inst.Name)); err != nil {
-			return err
-		}
-		if _, err := b.Write(encodeNum(len(inst.InstanceVars))); err != nil {
-			return err
-		}
-		for k, v := range inst.InstanceVars {
-			if err := encodeSym(b, Symbol(k)); err != nil {
-				return err
-			}
-			if err := encodeVal(b, v); err != nil {
-				return err
-			}
 		}
 	}
 
