@@ -78,6 +78,14 @@ func TestEncodeInts(t *testing.T) {
 	checkAgainstRuby(t, &v, "123")
 }
 
+func TestEncodeFloats(t *testing.T) {
+	checkAgainstRuby(t, 123.33, "123.33")
+
+	// Ptrs
+	v := 123.33
+	checkAgainstRuby(t, &v, "123.33")
+}
+
 func TestEncodeStrings(t *testing.T) {
 	checkAgainstRuby(t, "hi", `"hi"`)
 

@@ -15,6 +15,7 @@ const (
 	TYPE_TRUE       = 'T'
 	TYPE_FALSE      = 'F'
 	TYPE_FIXNUM     = 'i'
+	TYPE_FLOAT      = 'f'
 	TYPE_ARRAY      = '['
 	TYPE_HASH       = '{'
 	TYPE_SYMBOL     = ':'
@@ -150,6 +151,12 @@ func (enc *Encoder) val(val interface{}) error {
 		} else {
 			return enc.fixnum(val)
 		}
+	case reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128:
+		if isptr {
+			return enc.float(v.Elem())
+		} else {
+			return enc.float(v)
+		}
 	case reflect.Slice, reflect.Array:
 		if isptr {
 			return enc.slice(v.Elem())
@@ -202,6 +209,13 @@ func (enc *Encoder) fixnum(val interface{}) error {
 	}
 
 	return enc.write(encodeNum(val))
+}
+
+func (enc *Encoder) float(v reflect.Value) error {
+	if err := enc.typ(TYPE_FLOAT); err != nil {
+		return err
+	}
+	return enc.rawstr(fmt.Sprintf("%v", v.Interface()))
 }
 
 func (enc *Encoder) slice(v reflect.Value) error {
