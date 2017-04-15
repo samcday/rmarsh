@@ -25,6 +25,7 @@ const (
 	TYPE_CLASS      = 'c'
 	TYPE_MODULE     = 'm'
 	TYPE_OBJECT     = 'o'
+	TYPE_LINK       = '@'
 	TYPE_USRMARSHAL = 'U'
 )
 
@@ -46,6 +47,7 @@ type Encoder struct {
 
 type encodingCtx struct {
 	symbolCache map[string]int
+	instCache   map[*Instance]int
 }
 
 func NewEncoder(w io.Writer) *Encoder {
@@ -66,7 +68,10 @@ func Encode(val interface{}) ([]byte, error) {
 
 func (enc *Encoder) Encode(val interface{}) error {
 	// Setup a new encoding context for this encode run.
-	enc.ctx = encodingCtx{symbolCache: make(map[string]int)}
+	enc.ctx = encodingCtx{
+		symbolCache: make(map[string]int),
+		instCache:   make(map[*Instance]int),
+	}
 
 	if _, err := enc.w.Write([]byte(magic)); err != nil {
 		errors.Wrap(err, "Failed to write Marshal 4.8 header")
@@ -85,16 +90,33 @@ func (enc *Encoder) val(val interface{}) error {
 	}
 
 	v := reflect.ValueOf(val)
+	isptr := v.Kind() == reflect.Ptr
 	typ := v.Type()
+	if isptr {
+		typ = v.Elem().Type()
+	}
 
 	if typ.AssignableTo(symbolType) {
+		if isptr {
+			return enc.symbol(*val.(*Symbol))
+		}
 		return enc.symbol(val.(Symbol))
 	} else if typ.AssignableTo(classType) {
+		if isptr {
+			return enc.class(*val.(*Class))
+		}
 		return enc.class(val.(Class))
 	} else if typ.AssignableTo(moduleType) {
+		if isptr {
+			return enc.module(*val.(*Module))
+		}
 		return enc.module(val.(Module))
 	} else if typ.AssignableTo(instanceType) {
-		return enc.instance(val.(Instance))
+		if isptr {
+			return enc.instance(val.(*Instance))
+		}
+		i := val.(Instance)
+		return enc.instance(&i)
 	} else if typ.AssignableTo(regexpType) {
 		return enc.regexp(val.(Regexp))
 	} else if typ.AssignableTo(rstringType) {
@@ -179,8 +201,6 @@ func (enc *Encoder) symbol(val Symbol) error {
 		return enc.symlink(id)
 	}
 
-	enc.ctx.symbolCache[str] = len(enc.ctx.symbolCache)
-
 	if err := enc.typ(TYPE_SYMBOL); err != nil {
 		return err
 	}
@@ -189,11 +209,20 @@ func (enc *Encoder) symbol(val Symbol) error {
 		return err
 	}
 
+	enc.ctx.symbolCache[str] = len(enc.ctx.symbolCache) + len(enc.ctx.instCache)
+
 	return enc.write([]byte(str))
 }
 
 func (enc *Encoder) symlink(id int) error {
 	if err := enc.typ(TYPE_SYMLINK); err != nil {
+		return err
+	}
+	return enc.write(encodeNum(id))
+}
+
+func (enc *Encoder) link(id int) error {
+	if err := enc.typ(TYPE_LINK); err != nil {
 		return err
 	}
 	return enc.write(encodeNum(id))
@@ -306,7 +335,11 @@ func (enc *Encoder) map_(v reflect.Value) error {
 	return nil
 }
 
-func (enc *Encoder) instance(i Instance) error {
+func (enc *Encoder) instance(i *Instance) error {
+	if id, found := enc.ctx.instCache[i]; found {
+		return enc.link(id)
+	}
+
 	// Instances with user marshalling are encoded differently.
 	if i.UserMarshalled {
 		if err := enc.typ(TYPE_USRMARSHAL); err != nil {
@@ -315,24 +348,34 @@ func (enc *Encoder) instance(i Instance) error {
 		if err := enc.symbol(Symbol(i.Name)); err != nil {
 			return err
 		}
-		return enc.val(i.Data)
-	}
 
-	if err := enc.typ(TYPE_OBJECT); err != nil {
-		return err
-	}
-	if err := enc.symbol(Symbol(i.Name)); err != nil {
-		return err
-	}
-	if err := enc.write(encodeNum(len(i.InstanceVars))); err != nil {
-		return err
-	}
-	for k, v := range i.InstanceVars {
-		if err := enc.symbol(Symbol(k)); err != nil {
+		// Need to insert the correct ID into the cache, after class name symbol but before ivars.
+		enc.ctx.instCache[i] = len(enc.ctx.symbolCache) + len(enc.ctx.instCache)
+
+		if err := enc.val(i.Data); err != nil {
 			return err
 		}
-		if err := enc.val(v); err != nil {
+	} else {
+		if err := enc.typ(TYPE_OBJECT); err != nil {
 			return err
+		}
+		if err := enc.symbol(Symbol(i.Name)); err != nil {
+			return err
+		}
+
+		// Need to insert the correct ID into the cache, after class name symbol but before ivars.
+		enc.ctx.instCache[i] = len(enc.ctx.symbolCache) + len(enc.ctx.instCache)
+
+		if err := enc.write(encodeNum(len(i.InstanceVars))); err != nil {
+			return err
+		}
+		for k, v := range i.InstanceVars {
+			if err := enc.symbol(Symbol(k)); err != nil {
+				return err
+			}
+			if err := enc.val(v); err != nil {
+				return err
+			}
 		}
 	}
 

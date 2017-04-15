@@ -2,6 +2,7 @@ package rubymarshal
 
 import (
 	"bytes"
+	"encoding/hex"
 	"os/exec"
 	"testing"
 )
@@ -18,12 +19,12 @@ func checkAgainstRuby(t *testing.T, val interface{}, expected string) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		t.Fatalf("Error checking Ruby: %s\n%s", err, stderr.String())
+		t.Fatalf("Ruby decode failed: %s\n%s\nRaw encoded:\n%s", err, stderr.String(), hex.Dump(b))
 	}
 
 	result := stdout.String()
 	if result != expected {
-		t.Errorf("Encoded %v (%T), Ruby saw %s, expected %q", val, val, result, expected)
+		t.Errorf("Encoded %v (%T), Ruby saw %s, expected %q\nRaw encoded:\n%s", val, val, result, expected, hex.Dump(b))
 	}
 }
 
@@ -37,9 +38,19 @@ func TestEncodeBools(t *testing.T) {
 }
 
 func TestEncodeSymbols(t *testing.T) {
+	// Basic symbol test
 	checkAgainstRuby(t, Symbol("test"), ":test")
 
+	// Basic symlink test
 	checkAgainstRuby(t, []Symbol{Symbol("test"), Symbol("test")}, "[:test, :test]")
+
+	// Slightly more contrived symlink test
+	checkAgainstRuby(t, []Symbol{
+		Symbol("foo"),
+		Symbol("bar"),
+		Symbol("bar"),
+		Symbol("foo"),
+	}, "[:foo, :bar, :bar, :foo]")
 }
 
 func TestEncodeInts(t *testing.T) {
@@ -78,12 +89,16 @@ func TestEncodeMap(t *testing.T) {
 }
 
 func TestEncodeInstance(t *testing.T) {
-	checkAgainstRuby(t, Instance{
+	inst := Instance{
 		Name: "Object",
 		InstanceVars: map[string]interface{}{
 			"@test": 123,
 		},
-	}, "#Object<:@test=123>")
+	}
+	checkAgainstRuby(t, inst, "#Object<:@test=123>")
+
+	// Checking object links
+	checkAgainstRuby(t, []interface{}{&inst, &inst}, "[#Object<:@test=123>, #Object<:@test=123>]")
 
 	checkAgainstRuby(t, Instance{
 		Name:           "Gem::Version",
