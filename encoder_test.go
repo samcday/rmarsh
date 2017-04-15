@@ -38,6 +38,8 @@ func TestEncodeBools(t *testing.T) {
 
 func TestEncodeSymbols(t *testing.T) {
 	checkAgainstRuby(t, Symbol("test"), ":test")
+
+	checkAgainstRuby(t, []Symbol{Symbol("test"), Symbol("test")}, "[:test, :test]")
 }
 
 func TestEncodeInts(t *testing.T) {

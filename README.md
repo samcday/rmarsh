@@ -53,7 +53,6 @@ When encoding, if we encounter raw Go `string` types, we'll assume they're UTF-8
 
 ## TODO
 
- * Symbol cache in encoder
  * Object instance cache in encoder
  * encoding support on Symbol
 

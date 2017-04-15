@@ -18,6 +18,7 @@ const (
 	TYPE_ARRAY      = '['
 	TYPE_HASH       = '{'
 	TYPE_SYMBOL     = ':'
+	TYPE_SYMLINK    = ';'
 	TYPE_STRING     = '"'
 	TYPE_REGEXP     = '/'
 	TYPE_IVAR       = 'I'
@@ -44,7 +45,7 @@ type Encoder struct {
 }
 
 type encodingCtx struct {
-	symbolCache map[string]uint8
+	symbolCache map[string]int
 }
 
 func NewEncoder(w io.Writer) *Encoder {
@@ -65,7 +66,7 @@ func Encode(val interface{}) ([]byte, error) {
 
 func (enc *Encoder) Encode(val interface{}) error {
 	// Setup a new encoding context for this encode run.
-	enc.ctx = encodingCtx{}
+	enc.ctx = encodingCtx{symbolCache: make(map[string]int)}
 
 	if _, err := enc.w.Write([]byte(magic)); err != nil {
 		errors.Wrap(err, "Failed to write Marshal 4.8 header")
@@ -174,6 +175,12 @@ func (enc *Encoder) symbol(val Symbol) error {
 		return fmt.Errorf("Symbol %s is not valid UTF-8", str)
 	}
 
+	if id, found := enc.ctx.symbolCache[str]; found {
+		return enc.symlink(id)
+	}
+
+	enc.ctx.symbolCache[str] = len(enc.ctx.symbolCache)
+
 	if err := enc.typ(TYPE_SYMBOL); err != nil {
 		return err
 	}
@@ -183,6 +190,13 @@ func (enc *Encoder) symbol(val Symbol) error {
 	}
 
 	return enc.write([]byte(str))
+}
+
+func (enc *Encoder) symlink(id int) error {
+	if err := enc.typ(TYPE_SYMLINK); err != nil {
+		return err
+	}
+	return enc.write(encodeNum(id))
 }
 
 func (enc *Encoder) ivar(data func() error, vars map[Symbol]interface{}) error {
