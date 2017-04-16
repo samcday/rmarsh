@@ -359,9 +359,9 @@ func (enc *Encoder) hash(v reflect.Value) error {
 }
 
 func (enc *Encoder) instance(i *Instance) error {
-	if id, found := enc.ctx.instCache[i]; found {
-		return enc.link(id)
-	}
+	// if id, found := enc.ctx.instCache[i]; found {
+	// 	return enc.link(id)
+	// }
 
 	// Instances with user marshalling are encoded differently.
 	if i.UserMarshalled {

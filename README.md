@@ -51,6 +51,10 @@ $ go run test.go | ruby -e 'puts Marshal.load($stdin).inspect'
 
 When encoding, if we encounter raw Go `string` types, we'll assume they're UTF-8 encoded. If a specific encoding needs to be used, you should wrap the string in an `IVar` (use the `NewEncodingIVar` helper) and specify the character encoding used.
 
+## TODO
+
+ * Proper object caching in encoder
+
 ## Useful links
 
  * http://jakegoulding.com/blog/2013/01/15/a-little-dip-into-rubys-marshal-format/
