@@ -25,7 +25,7 @@ var (
 	moduleType   = reflect.TypeOf(Module(""))
 	instanceType = reflect.TypeOf(Instance{})
 	regexpType   = reflect.TypeOf(Regexp{})
-	rstringType  = reflect.TypeOf(RString{})
+	ivarType     = reflect.TypeOf(IVar{})
 
 	bigIntType = reflect.TypeOf(*big.NewInt(0))
 )
@@ -76,112 +76,63 @@ func (enc *Encoder) Encode(val interface{}) error {
 }
 
 func (enc *Encoder) val(val interface{}) error {
+	return enc.val2(val, true)
+}
+
+func (enc *Encoder) val2(val interface{}, strwrap bool) error {
 	if val == nil {
 		return enc.nil()
 	}
 
 	v := reflect.ValueOf(val)
-	isptr := v.Kind() == reflect.Ptr
-	typ := v.Type()
-	if isptr {
-		typ = v.Elem().Type()
-	}
-
-	if typ.AssignableTo(symbolType) {
-		if isptr {
-			return enc.symbol(*val.(*Symbol))
-		} else {
-			return enc.symbol(val.(Symbol))
-		}
-	} else if typ.AssignableTo(classType) {
-		if isptr {
-			return enc.class(*val.(*Class))
-		} else {
-			return enc.class(val.(Class))
-		}
-	} else if typ.AssignableTo(moduleType) {
-		if isptr {
-			return enc.module(*val.(*Module))
-		} else {
-			return enc.module(val.(Module))
-		}
-	} else if typ.AssignableTo(instanceType) {
-		if isptr {
-			return enc.instance(val.(*Instance))
-		} else {
-			i := val.(Instance)
-			return enc.instance(&i)
-		}
-	} else if typ.AssignableTo(regexpType) {
-		if isptr {
-			return enc.regexp(*val.(*Regexp))
-		} else {
-			return enc.regexp(val.(Regexp))
-		}
-	} else if typ.AssignableTo(rstringType) {
-		if isptr {
-			rstr := val.(*RString)
-			return enc.string(rstr.Raw, rstr.Encoding)
-		} else {
-			rstr := val.(RString)
-			return enc.string(rstr.Raw, rstr.Encoding)
-		}
-	} else if typ.AssignableTo(bigIntType) {
-		if isptr {
-			return enc.bignum(val.(*big.Int))
-		} else {
-			v := val.(big.Int)
-			return enc.bignum(&v)
-		}
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
 	}
 
 	kind := v.Kind()
-	if isptr {
-		kind = v.Elem().Kind()
-	}
-
 	switch kind {
-	case reflect.Bool:
-		if isptr {
-			return enc.bool(*val.(*bool))
-		} else {
-			return enc.bool(val.(bool))
-		}
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		if isptr {
-			return enc.fixnum(v.Elem())
-		} else {
-			return enc.fixnum(v)
-		}
-	case reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128:
-		if isptr {
-			return enc.float(v.Elem())
-		} else {
-			return enc.float(v)
-		}
 	case reflect.Slice, reflect.Array:
-		if isptr {
-			return enc.slice(v.Elem())
-		} else {
-			return enc.slice(v)
-		}
+		return enc.slice(v)
 	case reflect.Map:
-		if isptr {
-			return enc.map_(v.Elem())
-		} else {
-			return enc.map_(v)
-		}
-	case reflect.String:
-		if isptr {
-			return enc.string(*val.(*string), "UTF-8")
-		} else {
-			return enc.string(val.(string), "UTF-8")
-		}
-	default:
-		return fmt.Errorf("Don't know how to encode type %T", val)
+		return enc.map_(v)
 	}
 
-	return nil
+	switch data := ptrto(val).(type) {
+	// Ruby wrapper types
+	case *Symbol:
+		return enc.symbol(*data)
+	case *Class:
+		return enc.class(*data)
+	case *Module:
+		return enc.module(*data)
+	case *Instance:
+		return enc.instance(data)
+	case *Regexp:
+		return enc.regexp(*data)
+	case *IVar:
+		return enc.ivar(data)
+	case *rawString:
+		return enc.string(string(*data))
+
+	// Core types
+	case *big.Int:
+		return enc.bignum(data)
+	case *bool:
+		return enc.bool(*data)
+	case *uint, *uint8, *uint16, *uint32, *uint64, *int, *int8, *int16, *int32, *int64:
+		return enc.fixnum(v)
+	case *float32, *float64, *complex64, *complex128:
+		return enc.float(v)
+	case *string:
+		if strwrap {
+			raw := rawString(*data)
+			ivar := NewEncodingIVar(&raw, "UTF-8")
+			return enc.ivar(ivar)
+		}
+		return enc.string(*data)
+	}
+
+	return fmt.Errorf("Don't know how to encode type %T", val)
 }
 
 func (enc *Encoder) write(b []byte) error {
@@ -308,70 +259,62 @@ func (enc *Encoder) link(id int) error {
 	return enc.write(encodeNum(id))
 }
 
-func (enc *Encoder) ivar(data func() error, vars map[Symbol]interface{}) error {
+func (enc *Encoder) ivar(ivar *IVar) error {
 	if err := enc.typ(TYPE_IVAR); err != nil {
 		return err
 	}
 
-	if err := data(); err != nil {
+	if err := enc.val2(ivar.Data, false); err != nil {
 		return err
 	}
 
-	if err := enc.write(encodeNum(len(vars))); err != nil {
+	if err := enc.write(encodeNum(len(ivar.Variables))); err != nil {
 		return err
 	}
 
-	for k, v := range vars {
-		if string(k) == "encoding" && reflect.TypeOf(v).Kind() == reflect.String {
-			encoding := v.(string)
-			// encoding instance var for UTF-8/ASCII are special cased.
-			if err := enc.symbol(Symbol("E")); err != nil {
-				return err
+	for k, v := range ivar.Variables {
+		if string(k) == "encoding" {
+			refl := reflect.ValueOf(v)
+			if refl.Kind() == reflect.String {
+				encoding := refl.String()
+				// encoding instance var for UTF-8/ASCII are special cased.
+				if encoding == "UTF-8" || encoding == "US-ASCII" {
+					if err := enc.symbol(Symbol("E")); err != nil {
+						return err
+					}
+					if err := enc.bool(encoding == "UTF-8"); err != nil {
+						return err
+					}
+					continue
+				}
 			}
-			if err := enc.bool(encoding == "UTF-8"); err != nil {
-				return err
-			}
-		} else {
-			if err := enc.symbol(k); err != nil {
-				return err
-			}
-			if err := enc.val(v); err != nil {
-				return err
-			}
+		}
+		if err := enc.symbol(k); err != nil {
+			return err
+		}
+		if err := enc.val(v); err != nil {
+			return err
 		}
 	}
 
 	return nil
 }
 
-func (enc *Encoder) string(str string, encoding string) error {
-	return enc.ivar(func() error {
-		if err := enc.typ(TYPE_STRING); err != nil {
-			return err
-		}
-		return enc.rawstr(str)
-	}, map[Symbol]interface{}{
-		Symbol("encoding"): encoding,
-	})
+func (enc *Encoder) string(str string) error {
+	if err := enc.typ(TYPE_STRING); err != nil {
+		return err
+	}
+	return enc.rawstr(str)
 }
 
 func (enc *Encoder) regexp(r Regexp) error {
-	encoding := r.Encoding
-	if encoding == "" {
-		encoding = "UTF-8"
+	if err := enc.typ(TYPE_REGEXP); err != nil {
+		return err
 	}
-
-	return enc.ivar(func() error {
-		if err := enc.typ(TYPE_REGEXP); err != nil {
-			return err
-		}
-		if err := enc.rawstr(r.Expr); err != nil {
-			return err
-		}
-		return enc.write([]byte{r.Flags})
-	}, map[Symbol]interface{}{
-		Symbol("encoding"): encoding,
-	})
+	if err := enc.rawstr(r.Expr); err != nil {
+		return err
+	}
+	return enc.write([]byte{r.Flags})
 }
 
 func (enc *Encoder) rawstr(str string) error {

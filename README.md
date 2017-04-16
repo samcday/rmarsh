@@ -49,11 +49,7 @@ $ go run test.go | ruby -e 'puts Marshal.load($stdin).inspect'
 
 ### A note on strings
 
-When encoding, if we encounter raw Go `string` types, we'll assume they're UTF-8 encoded. If a specific encoding needs to be used, you should wrap the string in an `RString` and specify the specific character encoding used.
-
-## TODO
-
- * encoding support on Symbol
+When encoding, if we encounter raw Go `string` types, we'll assume they're UTF-8 encoded. If a specific encoding needs to be used, you should wrap the string in an `IVar` (use the `NewEncodingIVar` helper) and specify the character encoding used.
 
 ## Useful links
 

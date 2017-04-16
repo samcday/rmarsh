@@ -6,18 +6,27 @@ package rubymarshal
 // Since Symbols can have specific encoding (and be encoded in Marshal as an IVAR)
 type Symbol string
 
+func NewSymbol(s string) *Symbol {
+	sym := Symbol(s)
+	return &sym
+}
+
 // Class represents a reference to a Ruby Class
 // https://ruby-doc.org/core-2.4.0/Class.html
 type Class string
+
+func NewClass(s string) *Class {
+	class := Class(s)
+	return &class
+}
 
 // Module represents a reference to a Ruby Module
 // https://ruby-doc.org/core-2.4.0/Module.html
 type Module string
 
-// RString represents a Ruby String with a specific encoding.
-type RString struct {
-	Raw      string
-	Encoding string
+func NewModule(s string) *Module {
+	mod := Module(s)
+	return &mod
 }
 
 // Instance represents an instance of a Ruby class.
@@ -33,9 +42,8 @@ type Instance struct {
 
 // Regexp represents a Ruby Regexp expression.
 type Regexp struct {
-	Expr     string
-	Encoding string
-	Flags    uint8
+	Expr  string
+	Flags uint8
 }
 
 const (
@@ -45,3 +53,18 @@ const (
 	REGEXP_FIXEDENCODING = 1 << 4
 	REGEXP_NOENCODING    = 1 << 5
 )
+
+type IVar struct {
+	Data      interface{}
+	Variables map[Symbol]interface{}
+}
+
+func NewEncodingIVar(data interface{}, encoding string) *IVar {
+	iv := IVar{Variables: make(map[Symbol]interface{})}
+	iv.Data = data
+	iv.Variables[Symbol("encoding")] = rawString(encoding)
+	return &iv
+}
+
+// A bit of a hack to ensure we break a recursive loop when handling encoding instance var
+type rawString string

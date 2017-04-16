@@ -24,11 +24,11 @@ func testRubyEncode(t *testing.T, payload string, expected interface{}) {
 	dec := NewDecoder(bytes.NewReader(raw))
 	v, err := dec.Decode()
 	if err != nil {
-		t.Fatalf("Decode() failed: %s\nRaw ruby encoded: %s", err, hex.Dump(raw))
+		t.Fatalf("Decode() failed: %s\nRaw ruby encoded:\n%s", err, hex.Dump(raw))
 	}
 
 	if !reflect.DeepEqual(v, expected) {
-		t.Errorf("Decode() gave %#v (%T), expected %#v\nRaw ruby encoded: %s", v, v, expected, hex.Dump(raw))
+		t.Errorf("Decode() gave %#v (%T), expected %#v\nRaw ruby encoded:\n%s", v, v, expected, hex.Dump(raw))
 	}
 }
 
@@ -63,4 +63,30 @@ func TestDecodeBignums(t *testing.T) {
 
 	exp.SetString("-DEADCAFEBEEF", 16)
 	testRubyEncode(t, "-0xDEADCAFEBEEF", &exp)
+}
+
+func TestDecodeArray(t *testing.T) {
+	testRubyEncode(t, "[]", []interface{}{})
+	testRubyEncode(t, "[nil, true, false]", []interface{}{nil, true, false})
+	testRubyEncode(t, "[[]]", []interface{}{[]interface{}{}})
+}
+
+func TestDecodeSymbol(t *testing.T) {
+	testRubyEncode(t, ":test", NewSymbol("test"))
+}
+
+func TestDecodeSymlink(t *testing.T) {
+	testRubyEncode(t, "[:test,:test]", []interface{}{NewSymbol("test"), NewSymbol("test")})
+}
+
+func TestDecodeModule(t *testing.T) {
+	testRubyEncode(t, "Process", NewModule("Process"))
+}
+
+func TestDecodeClass(t *testing.T) {
+	testRubyEncode(t, "Gem::Version", NewClass("Gem::Version"))
+}
+
+func TestDecodeString(t *testing.T) {
+	testRubyEncode(t, `"test".force_encoding("SHIFT_JIS")`, "test")
 }

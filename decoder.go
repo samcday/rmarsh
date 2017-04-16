@@ -11,7 +11,8 @@ import (
 )
 
 type Decoder struct {
-	r *bufio.Reader
+	r           *bufio.Reader
+	symbolCache map[int]*Symbol
 }
 
 func NewDecoder(r io.Reader) *Decoder {
@@ -19,6 +20,8 @@ func NewDecoder(r io.Reader) *Decoder {
 }
 
 func (dec *Decoder) Decode() (interface{}, error) {
+	dec.symbolCache = make(map[int]*Symbol)
+
 	m, err := dec.uint16("magic")
 	if err != nil {
 		return nil, err
@@ -46,14 +49,23 @@ func (dec *Decoder) val() (interface{}, error) {
 		return dec.num()
 	case TYPE_BIGNUM:
 		return dec.bignum()
-		// case TYPE_ARRAY:
-		// 	sz, err := dec.num()
-		// 	if err != nil {
-		// 		return nil, err
-		// 	}
+	case TYPE_ARRAY:
+		return dec.array()
+	case TYPE_SYMBOL:
+		return dec.symbol()
+	case TYPE_SYMLINK:
+		return dec.symlink()
+	case TYPE_MODULE:
+		return dec.module()
+	case TYPE_CLASS:
+		return dec.class()
+	case TYPE_IVAR:
+		return dec.ivar()
+	case TYPE_STRING:
+		return dec.rawstr()
+	default:
+		return nil, fmt.Errorf("Unknown type %X", typ)
 	}
-
-	return nil, nil
 }
 
 func (dec *Decoder) num() (int64, error) {
@@ -126,6 +138,100 @@ func (dec *Decoder) bignum() (*big.Int, error) {
 	return &bigint, nil
 }
 
+func (dec *Decoder) array() ([]interface{}, error) {
+	sz, err := dec.num()
+	if err != nil {
+		return nil, err
+	}
+
+	arr := make([]interface{}, sz)
+
+	for i := 0; i < int(sz); i++ {
+		v, err := dec.val()
+		if err != nil {
+			return nil, err
+		}
+		arr[i] = v
+	}
+
+	return arr, nil
+}
+
+func (dec *Decoder) symbol() (*Symbol, error) {
+	str, err := dec.rawstr()
+	if err != nil {
+		return nil, err
+	}
+
+	sym := NewSymbol(str)
+	dec.symbolCache[len(dec.symbolCache)] = sym
+
+	return sym, nil
+}
+
+func (dec *Decoder) symlink() (*Symbol, error) {
+	id, err := dec.num()
+	if err != nil {
+		return nil, err
+	}
+
+	sym, found := dec.symbolCache[int(id)]
+	if !found {
+		return nil, fmt.Errorf("Invalid symlink id %d encountered", id)
+	}
+	return sym, nil
+}
+
+func (dec *Decoder) module() (*Module, error) {
+	str, err := dec.rawstr()
+	if err != nil {
+		return nil, err
+	}
+
+	return NewModule(str), nil
+}
+
+func (dec *Decoder) class() (*Class, error) {
+	str, err := dec.rawstr()
+	if err != nil {
+		return nil, err
+	}
+
+	return NewClass(str), nil
+}
+
+func (dec *Decoder) ivar() (interface{}, error) {
+	val, err := dec.val()
+	if err != nil {
+		return nil, err
+	}
+
+	num, err := dec.num()
+	if err != nil {
+		return nil, err
+	}
+
+	ivars := make(map[interface{}]interface{}, num)
+	for i := 0; i < int(num); i++ {
+		k, err := dec.val()
+		if err != nil {
+			return nil, err
+		}
+		v, err := dec.val()
+		if err != nil {
+			return nil, err
+		}
+
+		ivars[k] = v
+	}
+
+	if len(ivars) == 1 {
+
+	}
+
+	return val, nil
+}
+
 func (dec *Decoder) byte(op string) (byte, error) {
 	b, err := dec.r.ReadByte()
 	if err != nil {
@@ -149,4 +255,18 @@ func (dec *Decoder) uint16(op string) (uint16, error) {
 		return 0, err
 	}
 	return binary.BigEndian.Uint16(b), nil
+}
+
+func (dec *Decoder) rawstr() (string, error) {
+	sz, err := dec.num()
+	if err != nil {
+		return "", err
+	}
+
+	b, err := dec.bytes(sz, "symbol")
+	if err != nil {
+		return "", err
+	}
+
+	return string(b), nil
 }
