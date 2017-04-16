@@ -12,9 +12,10 @@ import (
 )
 
 type Decoder struct {
-	r         *bufio.Reader
-	symCache  map[int]*Symbol
-	instCache map[int]interface{}
+	r        *bufio.Reader
+	off      int64
+	symCache map[int]*Symbol
+	objCache map[int]interface{}
 }
 
 func NewDecoder(r io.Reader) *Decoder {
@@ -23,14 +24,15 @@ func NewDecoder(r io.Reader) *Decoder {
 
 func (dec *Decoder) Decode() (interface{}, error) {
 	dec.symCache = make(map[int]*Symbol)
-	dec.instCache = make(map[int]interface{})
+	dec.objCache = make(map[int]interface{})
+	dec.off = 0
 
 	m, err := dec.uint16("magic")
 	if err != nil {
 		return nil, err
 	}
 	if m != 0x0408 {
-		return nil, fmt.Errorf("Unexpected magic header %d", m)
+		return nil, dec.error(fmt.Sprintf("Unexpected magic header %d", m))
 	}
 
 	return dec.val()
@@ -73,7 +75,7 @@ func (dec *Decoder) val() (interface{}, error) {
 	case TYPE_LINK:
 		return dec.link()
 	default:
-		return nil, fmt.Errorf("Unknown type %X", typ)
+		return nil, dec.error(fmt.Sprintf("Unknown type %X", typ))
 	}
 }
 
@@ -163,7 +165,7 @@ func (dec *Decoder) array() ([]interface{}, error) {
 		arr[i] = v
 	}
 
-	dec.instCache[len(dec.instCache)] = arr
+	dec.cacheObj(arr)
 
 	return arr, nil
 }
@@ -188,7 +190,7 @@ func (dec *Decoder) hash() (interface{}, error) {
 		m[k] = v
 	}
 
-	dec.instCache[len(dec.instCache)] = m
+	dec.cacheObj(m)
 
 	return m, nil
 }
@@ -212,7 +214,7 @@ func (dec *Decoder) symlink() (Symbol, error) {
 
 	sym, found := dec.symCache[int(id)]
 	if !found {
-		return "", fmt.Errorf("Invalid symbol symlink id %d encountered.", id)
+		return "", dec.error(fmt.Sprintf("Invalid symbol symlink id %d encountered.", id))
 	}
 	return *sym, nil
 }
@@ -285,6 +287,8 @@ func (dec *Decoder) instance(usr bool) (*Instance, error) {
 		return nil, err
 	}
 
+	dec.cacheObj(inst)
+
 	if usr {
 		val, err := dec.val()
 		if err != nil {
@@ -292,9 +296,6 @@ func (dec *Decoder) instance(usr bool) (*Instance, error) {
 		}
 		inst.Data = val
 	}
-
-	// instCache id is inserted after user marshalled data, but before ivars.
-	dec.instCache[len(dec.instCache)] = inst
 
 	if !usr {
 		sz, err := dec.num()
@@ -327,11 +328,11 @@ func (dec *Decoder) link() (interface{}, error) {
 		return nil, err
 	}
 
-	if inst, found := dec.instCache[int(id)]; found {
+	if inst, found := dec.objCache[int(id)]; found {
 		return inst, nil
 	}
 
-	return nil, fmt.Errorf("Object link with id %d not found", id)
+	return nil, dec.error(fmt.Sprintf("Object link with id %d not found.", id))
 }
 
 // Expects next value in stream to be a Symbol and returns the string repr of it.
@@ -343,7 +344,7 @@ func (dec *Decoder) nextsym() (string, error) {
 	if sym, ok := v.(Symbol); ok {
 		return string(sym), nil
 	} else {
-		return "", fmt.Errorf("Unexpected value %v (%T) - expected Symbol", v, v)
+		return "", dec.error(fmt.Sprintf("Unexpected value %v (%T) - expected Symbol", v, v))
 	}
 }
 
@@ -352,6 +353,7 @@ func (dec *Decoder) byte(op string) (byte, error) {
 	if err != nil {
 		return 0, errors.Wrap(err, fmt.Sprintf("Error while reading %s", op))
 	}
+	dec.off++
 	return b, nil
 }
 
@@ -361,6 +363,7 @@ func (dec *Decoder) bytes(sz int64, op string) ([]byte, error) {
 	if _, err := io.ReadFull(dec.r, b); err != nil {
 		return nil, errors.Wrap(err, fmt.Sprintf("Error while reading %s", op))
 	}
+	dec.off += sz
 	return b, nil
 }
 
@@ -383,5 +386,16 @@ func (dec *Decoder) rawstr() (string, error) {
 		return "", err
 	}
 
-	return string(b), nil
+	str := string(b)
+	dec.cacheObj(str)
+
+	return str, nil
+}
+
+func (dec *Decoder) cacheObj(v interface{}) {
+	dec.objCache[len(dec.objCache)] = v
+}
+
+func (dec *Decoder) error(msg string) error {
+	return errors.New(fmt.Sprintf("%s (offset=%d)", msg, dec.off))
 }
