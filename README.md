@@ -1,9 +1,9 @@
-# rubymarshal
+# rmarsh
 
 A [Ruby Marshal (version 4.8)](https://ruby-doc.org/core-2.3.0/Marshal.html) encoder/decoder in Golang. Why? Who knows.
 
 ```sh
-go get github.com/samcday/rubymarshal
+go get github.com/samcday/rmarsh
 ```
 
 ## Encoding
@@ -17,15 +17,15 @@ package main
 
 import(
   "os"
-  "github.com/samcday/rubymarshal"
+  "github.com/samcday/rmarsh"
 )
 
 func main() {
-  b, err := rubymarshal.Encode(map[string]interface{}{
-    "Test": []interface{}{123, "hello!", rubymarshal.Symbol("testsym")},
-    "SomeClass": rubymarshal.Class("File::Stat"),
-    "SomeModule": rubymarshal.Module("Process"),
-    "AnInstance": rubymarshal.Instance{
+  b, err := rmarsh.Encode(map[string]interface{}{
+    "Test": []interface{}{123, "hello!", rmarsh.Symbol("testsym")},
+    "SomeClass": rmarsh.Class("File::Stat"),
+    "SomeModule": rmarsh.Module("Process"),
+    "AnInstance": rmarsh.Instance{
       Name: "Gem::Version",
       UserMarshalled: true,
       Data: []string{"1.2.3"},

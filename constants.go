@@ -1,4 +1,4 @@
-package rubymarshal
+package rmarsh
 
 const (
 	TYPE_NIL        = '0'

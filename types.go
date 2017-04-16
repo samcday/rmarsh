@@ -1,4 +1,4 @@
-package rubymarshal
+package rmarsh
 
 // Symbol represents a Ruby Symbol
 // https://ruby-doc.org/core-2.4.0/Symbol.html
