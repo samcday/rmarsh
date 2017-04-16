@@ -68,8 +68,14 @@ func testRubyEncode(t *testing.T, payload string, expected interface{}) {
 		t.Fatalf("Decode() failed: %s\nRaw ruby encoded:\n%s", err, hex.Dump(raw))
 	}
 
-	if !reflect.DeepEqual(v, expected) {
-		t.Errorf("Decode() gave %#v (%T), expected %#v\nRaw ruby encoded:\n%s", v, v, expected, hex.Dump(raw))
+	if expected != nil && reflect.TypeOf(expected).Kind() == reflect.Func {
+		if err := expected.(func(interface{}) error)(v); err != nil {
+			t.Errorf(fmt.Sprintf("%s\nRaw ruby encoded:\n%s\n", err.Error(), hex.Dump(raw)))
+		}
+	} else {
+		if !reflect.DeepEqual(v, expected) {
+			t.Errorf("Decode() gave %#v (%T), expected %#v\nRaw ruby encoded:\n%s\n", v, v, expected, hex.Dump(raw))
+		}
 	}
 }
 
@@ -112,12 +118,18 @@ func TestDecodeArray(t *testing.T) {
 	testRubyEncode(t, "[[]]", []interface{}{[]interface{}{}})
 }
 
+func TestDecodeHash(t *testing.T) {
+	testRubyEncode(t, "{:foo => 123}", map[interface{}]interface{}{
+		Symbol("foo"): int64(123),
+	})
+}
+
 func TestDecodeSymbol(t *testing.T) {
-	testRubyEncode(t, ":test", NewSymbol("test"))
+	testRubyEncode(t, ":test", Symbol("test"))
 }
 
 func TestDecodeSymlink(t *testing.T) {
-	testRubyEncode(t, "[:test,:test]", []interface{}{NewSymbol("test"), NewSymbol("test")})
+	testRubyEncode(t, "[:test,:test]", []interface{}{Symbol("test"), Symbol("test")})
 }
 
 func TestDecodeModule(t *testing.T) {
@@ -129,5 +141,26 @@ func TestDecodeClass(t *testing.T) {
 }
 
 func TestDecodeString(t *testing.T) {
-	testRubyEncode(t, `"test".force_encoding("SHIFT_JIS")`, "test")
+	testRubyEncode(t, `"test"`, "test")
+}
+
+func TestDecodeInstance(t *testing.T) {
+	testRubyEncode(t, `Gem::Version.new("1.2.3")`, &Instance{
+		Name:           "Gem::Version",
+		UserMarshalled: true,
+		Data:           []interface{}{"1.2.3"},
+	})
+}
+
+func TestDecodeLink(t *testing.T) {
+	testRubyEncode(t, `u = Gem::Version.new("1.2.3"); [u,u]`, func(v interface{}) error {
+		arr, ok := v.([]interface{})
+		if !ok {
+			return fmt.Errorf("Unexpected type %T", v)
+		}
+		if arr[0] != arr[1] {
+			return fmt.Errorf("%v (%T) != %v (%T)", arr[0], arr[0], arr[1], arr[1])
+		}
+		return nil
+	})
 }

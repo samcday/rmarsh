@@ -2,14 +2,7 @@ package rubymarshal
 
 // Symbol represents a Ruby Symbol
 // https://ruby-doc.org/core-2.4.0/Symbol.html
-// TODO: can't actually type this as a string.
-// Since Symbols can have specific encoding (and be encoded in Marshal as an IVAR)
 type Symbol string
-
-func NewSymbol(s string) *Symbol {
-	sym := Symbol(s)
-	return &sym
-}
 
 // Class represents a reference to a Ruby Class
 // https://ruby-doc.org/core-2.4.0/Class.html
@@ -56,13 +49,13 @@ const (
 
 type IVar struct {
 	Data      interface{}
-	Variables map[Symbol]interface{}
+	Variables map[string]interface{}
 }
 
 func NewEncodingIVar(data interface{}, encoding string) *IVar {
-	iv := IVar{Variables: make(map[Symbol]interface{})}
+	iv := IVar{Variables: make(map[string]interface{})}
 	iv.Data = data
-	iv.Variables[Symbol("encoding")] = rawString(encoding)
+	iv.Variables["encoding"] = rawString(encoding)
 	return &iv
 }
 

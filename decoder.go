@@ -6,13 +6,15 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"reflect"
 
 	"github.com/pkg/errors"
 )
 
 type Decoder struct {
-	r           *bufio.Reader
-	symbolCache map[int]*Symbol
+	r         *bufio.Reader
+	symCache  map[int]*Symbol
+	instCache map[int]interface{}
 }
 
 func NewDecoder(r io.Reader) *Decoder {
@@ -20,7 +22,8 @@ func NewDecoder(r io.Reader) *Decoder {
 }
 
 func (dec *Decoder) Decode() (interface{}, error) {
-	dec.symbolCache = make(map[int]*Symbol)
+	dec.symCache = make(map[int]*Symbol)
+	dec.instCache = make(map[int]interface{})
 
 	m, err := dec.uint16("magic")
 	if err != nil {
@@ -51,6 +54,8 @@ func (dec *Decoder) val() (interface{}, error) {
 		return dec.bignum()
 	case TYPE_ARRAY:
 		return dec.array()
+	case TYPE_HASH:
+		return dec.hash()
 	case TYPE_SYMBOL:
 		return dec.symbol()
 	case TYPE_SYMLINK:
@@ -63,6 +68,10 @@ func (dec *Decoder) val() (interface{}, error) {
 		return dec.ivar()
 	case TYPE_STRING:
 		return dec.rawstr()
+	case TYPE_USRMARSHAL, TYPE_OBJECT:
+		return dec.instance(typ == TYPE_USRMARSHAL)
+	case TYPE_LINK:
+		return dec.link()
 	default:
 		return nil, fmt.Errorf("Unknown type %X", typ)
 	}
@@ -154,32 +163,58 @@ func (dec *Decoder) array() ([]interface{}, error) {
 		arr[i] = v
 	}
 
+	dec.instCache[len(dec.instCache)] = arr
+
 	return arr, nil
 }
 
-func (dec *Decoder) symbol() (*Symbol, error) {
-	str, err := dec.rawstr()
+func (dec *Decoder) hash() (interface{}, error) {
+	sz, err := dec.num()
 	if err != nil {
 		return nil, err
 	}
 
-	sym := NewSymbol(str)
-	dec.symbolCache[len(dec.symbolCache)] = sym
+	m := make(map[interface{}]interface{}, sz)
 
+	for i := 0; i < int(sz); i++ {
+		k, err := dec.val()
+		if err != nil {
+			return nil, err
+		}
+		v, err := dec.val()
+		if err != nil {
+			return nil, err
+		}
+		m[k] = v
+	}
+
+	dec.instCache[len(dec.instCache)] = m
+
+	return m, nil
+}
+
+func (dec *Decoder) symbol() (Symbol, error) {
+	str, err := dec.rawstr()
+	if err != nil {
+		return "", err
+	}
+
+	sym := Symbol(str)
+	dec.symCache[len(dec.symCache)] = &sym
 	return sym, nil
 }
 
-func (dec *Decoder) symlink() (*Symbol, error) {
+func (dec *Decoder) symlink() (Symbol, error) {
 	id, err := dec.num()
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
-	sym, found := dec.symbolCache[int(id)]
+	sym, found := dec.symCache[int(id)]
 	if !found {
-		return nil, fmt.Errorf("Invalid symlink id %d encountered", id)
+		return "", fmt.Errorf("Invalid symbol symlink id %d encountered.", id)
 	}
-	return sym, nil
+	return *sym, nil
 }
 
 func (dec *Decoder) module() (*Module, error) {
@@ -211,9 +246,9 @@ func (dec *Decoder) ivar() (interface{}, error) {
 		return nil, err
 	}
 
-	ivars := make(map[interface{}]interface{}, num)
+	ivars := make(map[string]interface{}, num)
 	for i := 0; i < int(num); i++ {
-		k, err := dec.val()
+		k, err := dec.nextsym()
 		if err != nil {
 			return nil, err
 		}
@@ -225,11 +260,91 @@ func (dec *Decoder) ivar() (interface{}, error) {
 		ivars[k] = v
 	}
 
-	if len(ivars) == 1 {
-
+	// If this is an ASCII/UTF-8 string and there's no other ivars associated
+	// Wee just unwrap and return the string itself.
+	if reflect.TypeOf(val).Name() == "string" && len(ivars) == 1 {
+		if _, found := ivars["E"]; found {
+			// It doesn't matter whether it's US-ASCII or UTF-8 proper. ASCII is a subset
+			// of UTF-8 so we can just pass it along unmolested.
+			return val, nil
+		}
 	}
 
-	return val, nil
+	return &IVar{
+		Data:      val,
+		Variables: ivars,
+	}, nil
+}
+
+func (dec *Decoder) instance(usr bool) (*Instance, error) {
+	inst := new(Instance)
+	var err error
+
+	inst.UserMarshalled = usr
+	if inst.Name, err = dec.nextsym(); err != nil {
+		return nil, err
+	}
+
+	if usr {
+		val, err := dec.val()
+		if err != nil {
+			return nil, err
+		}
+		inst.Data = val
+	}
+
+	// instCache id is inserted after user marshalled data, but before ivars.
+	dec.instCache[len(dec.instCache)] = inst
+
+	if !usr {
+		sz, err := dec.num()
+		if err != nil {
+			return nil, err
+		}
+		inst.InstanceVars = make(map[string]interface{})
+
+		for i := 0; i < int(sz); i++ {
+			key, err := dec.nextsym()
+			if err != nil {
+				return nil, err
+			}
+
+			val, err := dec.val()
+			if err != nil {
+				return nil, err
+			}
+
+			inst.InstanceVars[key] = val
+		}
+	}
+
+	return inst, nil
+}
+
+func (dec *Decoder) link() (interface{}, error) {
+	id, err := dec.num()
+	if err != nil {
+		return nil, err
+	}
+
+	if inst, found := dec.instCache[int(id)]; found {
+		return inst, nil
+	}
+
+	return nil, fmt.Errorf("Object link with id %d not found", id)
+}
+
+// Expects next value in stream to be a Symbol and returns the string repr of it.
+func (dec *Decoder) nextsym() (string, error) {
+	v, err := dec.val()
+	if err != nil {
+		return "", err
+	}
+	if sym, ok := v.(Symbol); ok {
+		return string(sym), nil
+	} else {
+		return "", fmt.Errorf("Unexpected value %v (%T) - expected Symbol", v, v)
+	}
 }
 
 func (dec *Decoder) byte(op string) (byte, error) {

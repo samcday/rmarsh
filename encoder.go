@@ -92,9 +92,9 @@ func (enc *Encoder) val2(val interface{}, strwrap bool) error {
 	kind := v.Kind()
 	switch kind {
 	case reflect.Slice, reflect.Array:
-		return enc.slice(v)
+		return enc.array(v)
 	case reflect.Map:
-		return enc.map_(v)
+		return enc.hash(v)
 	}
 
 	switch data := ptrto(val).(type) {
@@ -203,7 +203,7 @@ func (enc *Encoder) float(v reflect.Value) error {
 	return enc.rawstr(fmt.Sprintf("%v", v.Interface()))
 }
 
-func (enc *Encoder) slice(v reflect.Value) error {
+func (enc *Encoder) array(v reflect.Value) error {
 	if err := enc.typ(TYPE_ARRAY); err != nil {
 		return err
 	}
@@ -240,7 +240,7 @@ func (enc *Encoder) symbol(val Symbol) error {
 		return err
 	}
 
-	enc.ctx.symbolCache[str] = len(enc.ctx.symbolCache) + len(enc.ctx.instCache)
+	enc.ctx.symbolCache[str] = len(enc.ctx.symbolCache)
 
 	return enc.write([]byte(str))
 }
@@ -289,7 +289,7 @@ func (enc *Encoder) ivar(ivar *IVar) error {
 				}
 			}
 		}
-		if err := enc.symbol(k); err != nil {
+		if err := enc.symbol(Symbol(k)); err != nil {
 			return err
 		}
 		if err := enc.val(v); err != nil {
@@ -338,7 +338,7 @@ func (enc *Encoder) module(m Module) error {
 	return enc.rawstr(string(m))
 }
 
-func (enc *Encoder) map_(v reflect.Value) error {
+func (enc *Encoder) hash(v reflect.Value) error {
 	if err := enc.typ(TYPE_HASH); err != nil {
 		return err
 	}
@@ -373,7 +373,7 @@ func (enc *Encoder) instance(i *Instance) error {
 		}
 
 		// Need to insert the correct ID into the cache, after class name symbol but before ivars.
-		enc.ctx.instCache[i] = len(enc.ctx.symbolCache) + len(enc.ctx.instCache)
+		enc.ctx.instCache[i] = len(enc.ctx.instCache)
 
 		if err := enc.val(i.Data); err != nil {
 			return err
