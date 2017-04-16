@@ -11,4 +11,16 @@ class Object
   end
 end
 
-print Marshal.load($stdin).inspect
+$stdout.sync = true
+
+begin
+  while true
+    begin
+      puts Marshal.load($stdin.readline('$$END$$').chomp('$$END$$')).inspect
+    rescue StandardError => e
+      puts "ERROR: #{e}"
+    end
+  end
+rescue Errno::EPIPE
+  exit 0
+end

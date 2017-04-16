@@ -1,26 +1,67 @@
 package rubymarshal
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/hex"
+	"fmt"
+	"io"
 	"math/big"
+	"os"
 	"os/exec"
 	"reflect"
-	"strings"
 	"testing"
 )
 
+var (
+	rubyDec    *exec.Cmd
+	rubyDecOut *bufio.Scanner
+	rubyDecIn  io.Writer
+)
+
+var streamDelim = []byte("$$END$$")
+
+func scanStream(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if len(data) >= 7 {
+		for i := 0; i <= len(data)-7; i++ {
+			if bytes.Compare(data[i:i+7], streamDelim) == 0 {
+				return i + 7, data[0:i], nil
+			}
+		}
+	}
+	return 0, nil, nil
+}
+
 func testRubyEncode(t *testing.T, payload string, expected interface{}) {
-	cmd := exec.Command("ruby", "decoder_test.rb")
-	cmd.Stdin = strings.NewReader(payload)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("Ruby encode failed: %s\n%s", err, stderr.String())
+	if rubyDec == nil {
+		rubyDec = exec.Command("ruby", "decoder_test.rb")
+		// Send stderr to top level so it's obvious if the Ruby script blew up somehow.
+		rubyDec.Stderr = os.Stdout
+
+		stdout, err := rubyDec.StdoutPipe()
+		if err != nil {
+			panic(err)
+		}
+		stdin, err := rubyDec.StdinPipe()
+		if err != nil {
+			panic(err)
+		}
+		if err := rubyDec.Start(); err != nil {
+			panic(err)
+		}
+
+		rubyDecOut = bufio.NewScanner(stdout)
+		rubyDecOut.Split(scanStream)
+		rubyDecIn = stdin
 	}
 
-	raw := stdout.Bytes()
+	_, err := io.WriteString(rubyDecIn, fmt.Sprintf("%s\n", payload))
+	if err != nil {
+		panic(err)
+	}
+
+	rubyDecOut.Scan()
+	raw := rubyDecOut.Bytes()
 	dec := NewDecoder(bytes.NewReader(raw))
 	v, err := dec.Decode()
 	if err != nil {

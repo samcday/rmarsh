@@ -1,31 +1,61 @@
 package rubymarshal
 
 import (
-	"bytes"
+	"bufio"
 	"encoding/hex"
+	"io"
 	"math/big"
+	"os"
 	"os/exec"
 	"testing"
 )
 
+var (
+	rubyEnc    *exec.Cmd
+	rubyEncOut *bufio.Scanner
+	rubyEncIn  io.Writer
+)
+
 func testRubyDecode(t *testing.T, val interface{}, expected string) {
+	if rubyEnc == nil {
+		rubyEnc = exec.Command("ruby", "encoder_test.rb")
+		// Send stderr to top level so it's obvious if the Ruby script blew up somehow.
+		rubyEnc.Stderr = os.Stdout
+
+		stdout, err := rubyEnc.StdoutPipe()
+		if err != nil {
+			panic(err)
+		}
+		stdin, err := rubyEnc.StdinPipe()
+		if err != nil {
+			panic(err)
+		}
+		if err := rubyEnc.Start(); err != nil {
+			panic(err)
+		}
+
+		rubyEncIn = stdin
+		rubyEncOut = bufio.NewScanner(stdout)
+	}
+
 	b, err := Encode(val)
 	if err != nil {
 		t.Fatalf("Encode() failed: %s", err)
 	}
 
-	cmd := exec.Command("ruby", "encoder_test.rb")
-	cmd.Stdin = bytes.NewReader(b)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("Ruby decode failed: %s\n%s\nRaw encoded:\n%s", err, stderr.String(), hex.Dump(b))
+	if _, err := rubyEncIn.Write(b); err != nil {
+		panic(err)
+	}
+	if _, err := io.WriteString(rubyEncIn, "$$END$$"); err != nil {
+		panic(err)
 	}
 
-	result := stdout.String()
+	if !rubyEncOut.Scan() {
+		t.Fatalf("Error scanning output")
+	}
+	result := rubyEncOut.Text()
 	if result != expected {
-		t.Errorf("Encoded %v (%T), Ruby saw %s, expected %q\nRaw encoded:\n%s", val, val, result, expected, hex.Dump(b))
+		t.Errorf("Encoded %v (%T), Ruby saw %s, expected %q\nRaw encoded:\n%s\n", val, val, result, expected, hex.Dump(b))
 	}
 }
 
