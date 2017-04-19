@@ -1,5 +1,10 @@
 package rmarsh
 
+import (
+	"fmt"
+	"reflect"
+)
+
 // Symbol represents a Ruby Symbol
 // https://ruby-doc.org/core-2.4.0/Symbol.html
 type Symbol string
@@ -61,3 +66,13 @@ func NewEncodingIVar(data interface{}, encoding string) *IVar {
 
 // A bit of a hack to ensure we break a recursive loop when handling encoding instance var
 type rawString string
+
+type InvalidTypeError struct {
+	ExpectedType string
+	ActualType   reflect.Type
+	Offset       int64
+}
+
+func (e InvalidTypeError) Error() string {
+	return fmt.Sprintf("Invalid type %s encountered at offset %d - expected %s", e.ActualType, e.Offset, e.ExpectedType)
+}
