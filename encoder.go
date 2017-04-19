@@ -17,19 +17,6 @@ const (
 	encodeNumMax = +0x3FFFFFFF
 )
 
-var (
-	magic = []byte{4, 8}
-
-	symbolType   = reflect.TypeOf(Symbol(""))
-	classType    = reflect.TypeOf(Class(""))
-	moduleType   = reflect.TypeOf(Module(""))
-	instanceType = reflect.TypeOf(Instance{})
-	regexpType   = reflect.TypeOf(Regexp{})
-	ivarType     = reflect.TypeOf(IVar{})
-
-	bigIntType = reflect.TypeOf(*big.NewInt(0))
-)
-
 // Encoder takes arbitrary Golang objects and writes them to a io.Writer in Ruby Marshal format.
 type Encoder struct {
 	w   io.Writer

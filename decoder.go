@@ -187,10 +187,6 @@ func (dec *Decoder) fixnum(v reflect.Value) error {
 	if v.Kind() == reflect.Struct && v.Type() == bigIntType {
 		bigint := v.Addr().Interface().(*big.Int)
 		bigint.SetInt64(n)
-
-		if n < 0 {
-			bigint.Neg(bigint)
-		}
 		return nil
 	}
 
@@ -225,7 +221,13 @@ func (dec *Decoder) float(v reflect.Value) error {
 		return nil
 	}
 
-	return nil
+	if v.Kind() == reflect.Struct && v.Type() == bigFloatType {
+		bigf := v.Addr().Interface().(*big.Float)
+		bigf.SetFloat64(f)
+		return nil
+	}
+
+	return InvalidTypeError{ExpectedType: "float", ActualType: v.Type(), Offset: off}
 }
 
 func (dec *Decoder) bignum(v reflect.Value) error {
