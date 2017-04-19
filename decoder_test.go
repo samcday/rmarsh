@@ -128,6 +128,14 @@ func TestDecodeFixnums(t *testing.T) {
 	}
 }
 
+func TestDecodeFloats(t *testing.T) {
+	var f *float32
+	testRubyEncode(t, "1.123", &f)
+	if *f != 1.123 {
+		t.Errorf("Expected f to be 1.123, got %v", *f)
+	}
+}
+
 func TestDecodeBignums(t *testing.T) {
 	var b big.Int
 	testRubyEncode(t, "0xDEADCAFEBEEF", &b)
@@ -175,9 +183,16 @@ func TestDecodeArray(t *testing.T) {
 
 	var iarr []int
 	testRubyEncode(t, `[123,321]`, &iarr)
-
 	if !reflect.DeepEqual(iarr, []int{123, 321}) {
-		t.Errorf(`Expected iarr to be [123,321], got %s`, iarr)
+		t.Errorf(`Expected iarr to be [123, 321], got %s`, iarr)
+	}
+
+	var iparr []*int
+	testRubyEncode(t, `[123,321]`, &iparr)
+	v1 := 123
+	v2 := 321
+	if !reflect.DeepEqual(iparr, []*int{&v1, &v2}) {
+		t.Errorf(`Expected iparr to be [123, 321], got %s`, iparr)
 	}
 
 	// testRubyEncode(t, "[nil, true, false]", []interface{}{nil, true, false})

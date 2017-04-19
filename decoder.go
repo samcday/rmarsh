@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/big"
 	"reflect"
+	"strconv"
 
 	"github.com/pkg/errors"
 )
@@ -61,6 +62,8 @@ func (dec *Decoder) val(v reflect.Value) error {
 		return dec.bool(v, false)
 	case TYPE_FIXNUM:
 		return dec.fixnum(v)
+	case TYPE_FLOAT:
+		return dec.float(v)
 	case TYPE_BIGNUM:
 		return dec.bignum(v)
 	case TYPE_SYMBOL:
@@ -149,6 +152,8 @@ func (dec *Decoder) long() (int64, error) {
 }
 
 func (dec *Decoder) fixnum(v reflect.Value) error {
+	off := dec.off
+
 	n, err := dec.long()
 	if err != nil {
 		return err
@@ -157,23 +162,23 @@ func (dec *Decoder) fixnum(v reflect.Value) error {
 	switch v.Kind() {
 	case reflect.Interface:
 		if v.NumMethod() > 0 {
-			return InvalidTypeError{ExpectedType: "(u)int", ActualType: v.Type(), Offset: dec.off}
+			return InvalidTypeError{ExpectedType: "(u)int", ActualType: v.Type(), Offset: off}
 		}
 		v.Set(reflect.ValueOf(n))
 		return nil
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		if v.OverflowInt(n) {
-			return InvalidTypeError{ExpectedType: fmt.Sprintf("int type large enough for value %v", n), ActualType: v.Type(), Offset: dec.off}
+			return InvalidTypeError{ExpectedType: fmt.Sprintf("int type large enough for value %v", n), ActualType: v.Type(), Offset: off}
 		}
 		v.SetInt(n)
 		return nil
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		un := uint64(n)
 		if n < 0 {
-			return InvalidTypeError{ExpectedType: "int", ActualType: v.Type(), Offset: dec.off}
+			return InvalidTypeError{ExpectedType: "int", ActualType: v.Type(), Offset: off}
 		}
 		if v.OverflowUint(un) {
-			return InvalidTypeError{ExpectedType: fmt.Sprintf("uint type large enough for value %v", n), ActualType: v.Type(), Offset: dec.off}
+			return InvalidTypeError{ExpectedType: fmt.Sprintf("uint type large enough for value %v", n), ActualType: v.Type(), Offset: off}
 		}
 		v.SetUint(un)
 		return nil
@@ -189,7 +194,38 @@ func (dec *Decoder) fixnum(v reflect.Value) error {
 		return nil
 	}
 
-	return InvalidTypeError{ExpectedType: "(u)int", ActualType: v.Type(), Offset: dec.off}
+	return InvalidTypeError{ExpectedType: "(u)int", ActualType: v.Type(), Offset: off}
+}
+
+func (dec *Decoder) float(v reflect.Value) error {
+	off := dec.off
+
+	str, err := dec.rawstr()
+	if err != nil {
+		return err
+	}
+
+	f, err := strconv.ParseFloat(str, 64)
+	if err != nil {
+		return err
+	}
+
+	switch v.Kind() {
+	case reflect.Interface:
+		if v.NumMethod() > 0 {
+			return InvalidTypeError{ExpectedType: "float", ActualType: v.Type(), Offset: off}
+		}
+		v.Set(reflect.ValueOf(f))
+		return nil
+	case reflect.Float32, reflect.Float64:
+		if v.OverflowFloat(f) {
+			return InvalidTypeError{ExpectedType: fmt.Sprintf("float type large enough for value %v", f), ActualType: v.Type(), Offset: off}
+		}
+		v.SetFloat(f)
+		return nil
+	}
+
+	return nil
 }
 
 func (dec *Decoder) bignum(v reflect.Value) error {
@@ -290,7 +326,7 @@ func (dec *Decoder) array(v reflect.Value) error {
 	}
 
 	for i := 0; i < int(sz); i++ {
-		if err := dec.val(v.Index(i)); err != nil {
+		if err := dec.val(indirect(v.Index(i))); err != nil {
 			return err
 		}
 	}
