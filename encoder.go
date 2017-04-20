@@ -119,6 +119,10 @@ func (enc *Encoder) val2(val interface{}, strwrap bool) error {
 		return enc.string(*data)
 	}
 
+	if v.Kind() == reflect.Struct {
+		return enc.strct(v)
+	}
+
 	return fmt.Errorf("Don't know how to encode type %T", val)
 }
 
@@ -339,6 +343,32 @@ func (enc *Encoder) hash(v reflect.Value) error {
 			return err
 		}
 		if err := enc.val(v.MapIndex(k).Interface()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (enc *Encoder) strct(v reflect.Value) error {
+	if err := enc.typ(TYPE_HASH); err != nil {
+		return err
+	}
+
+	t := v.Type()
+	if err := enc.write(encodeNum(t.NumField())); err != nil {
+		return err
+	}
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		name := f.Tag.Get("rmarsh")
+		if name == "" {
+			name = f.Name
+		}
+
+		if err := enc.symbol(Symbol(name)); err != nil {
+			return err
+		}
+		if err := enc.val(v.FieldByIndex(f.Index).Interface()); err != nil {
 			return err
 		}
 	}

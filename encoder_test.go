@@ -210,3 +210,11 @@ func TestEncodeRegexp(t *testing.T) {
 	v := Regexp{Expr: "test"}
 	testRubyDecode(t, &v, "/test/")
 }
+
+type encodeStruct struct {
+	Foo string `rmarsh:"quux"`
+}
+
+func TestEncodeStruct(t *testing.T) {
+	testRubyDecode(t, &encodeStruct{Foo: "test"}, `{:quux=>test}`)
+}
