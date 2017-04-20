@@ -16,7 +16,7 @@ type Decoder struct {
 	r        *bufio.Reader
 	off      int64
 	symCache map[int]*Symbol
-	objCache map[int]interface{}
+	objCache map[int]reflect.Value
 }
 
 func NewDecoder(r io.Reader) *Decoder {
@@ -30,7 +30,7 @@ func (dec *Decoder) Decode(v interface{}) error {
 	}
 
 	dec.symCache = make(map[int]*Symbol)
-	dec.objCache = make(map[int]interface{})
+	dec.objCache = make(map[int]reflect.Value)
 	dec.off = 0
 
 	m, err := dec.uint16("magic")
@@ -72,8 +72,10 @@ func (dec *Decoder) val(v reflect.Value) error {
 		return dec.array(v)
 	case TYPE_HASH:
 		return dec.hash(v)
-	// case TYPE_SYMLINK:
-	// 	return dec.symlink()
+	case TYPE_SYMLINK:
+		return dec.symlink(v)
+	case TYPE_LINK:
+		return dec.link(v)
 	// case TYPE_MODULE:
 	// 	return dec.module()
 	// case TYPE_CLASS:
@@ -84,8 +86,6 @@ func (dec *Decoder) val(v reflect.Value) error {
 	// 	return dec.rawstr()
 	// case TYPE_USRMARSHAL, TYPE_OBJECT:
 	// 	return dec.instance(typ == TYPE_USRMARSHAL)
-	// case TYPE_LINK:
-	// 	return dec.link()
 	default:
 		return dec.error(fmt.Sprintf("Unknown type %X", typ))
 	}
@@ -278,17 +278,7 @@ func (dec *Decoder) symbol(v reflect.Value) error {
 		return err
 	}
 
-	switch v.Kind() {
-	case reflect.String:
-		v.SetString(str)
-		return nil
-	case reflect.Interface:
-		if v.NumMethod() == 0 {
-			v.Set(reflect.ValueOf(str))
-		}
-	}
-
-	return InvalidTypeError{ExpectedType: "string|Symbol", ActualType: v.Type(), Offset: off}
+	return setString(v, str, off)
 }
 
 func (dec *Decoder) array(v reflect.Value) error {
@@ -332,8 +322,7 @@ func (dec *Decoder) array(v reflect.Value) error {
 		}
 	}
 
-	// TODO: fix caching
-	// dec.cacheObj(arr)
+	dec.cacheObj(v)
 
 	return nil
 }
@@ -412,18 +401,37 @@ func (dec *Decoder) hashStruct(v reflect.Value, sz int) error {
 	return nil
 }
 
-// func (dec *Decoder) symlink() (Symbol, error) {
-// 	id, err := dec.num()
-// 	if err != nil {
-// 		return "", err
-// 	}
+func (dec *Decoder) symlink(v reflect.Value) error {
+	off := dec.off
 
-// 	sym, found := dec.symCache[int(id)]
-// 	if !found {
-// 		return "", dec.error(fmt.Sprintf("Invalid symbol symlink id %d encountered.", id))
-// 	}
-// 	return *sym, nil
-// }
+	id, err := dec.long()
+	if err != nil {
+		return err
+	}
+
+	sym, found := dec.symCache[int(id)]
+	if !found {
+		return UnresolvedLinkError{Id: id, Offset: off}
+	}
+
+	return setString(v, string(*sym), off)
+}
+
+func (dec *Decoder) link(v reflect.Value) error {
+	off := dec.off
+
+	id, err := dec.long()
+	if err != nil {
+		return err
+	}
+
+	_, found := dec.objCache[int(id)]
+	if !found {
+		return UnresolvedLinkError{Id: id, Offset: off}
+	}
+
+	return fmt.Errorf("Object links currently unimplemented")
+}
 
 // func (dec *Decoder) module() (*Module, error) {
 // 	str, err := dec.rawstr()
@@ -528,19 +536,6 @@ func (dec *Decoder) hashStruct(v reflect.Value, sz int) error {
 // 	return inst, nil
 // }
 
-// func (dec *Decoder) link() (interface{}, error) {
-// 	id, err := dec.num()
-// 	if err != nil {
-// 		return nil, err
-// 	}
-
-// 	if inst, found := dec.objCache[int(id)]; found {
-// 		return inst, nil
-// 	}
-
-// 	return nil, dec.error(fmt.Sprintf("Object link with id %d not found.", id))
-// }
-
 // // Expects next value in stream to be a Symbol and returns the string repr of it.
 // func (dec *Decoder) nextsym() (string, error) {
 // 	v, err := dec.val()
@@ -593,12 +588,12 @@ func (dec *Decoder) rawstr() (string, error) {
 	}
 
 	str := string(b)
-	dec.cacheObj(str)
+	// dec.cacheObj(str)
 
 	return str, nil
 }
 
-func (dec *Decoder) cacheObj(v interface{}) {
+func (dec *Decoder) cacheObj(v reflect.Value) {
 	dec.objCache[len(dec.objCache)] = v
 }
 
@@ -628,6 +623,21 @@ func indirect(v reflect.Value) reflect.Value {
 	}
 
 	return v
+}
+
+func setString(v reflect.Value, str string, off int64) error {
+	switch v.Kind() {
+	case reflect.String:
+		v.SetString(str)
+		return nil
+	case reflect.Interface:
+		if v.NumMethod() == 0 {
+			v.Set(reflect.ValueOf(str))
+			return nil
+		}
+	}
+
+	return InvalidTypeError{ExpectedType: "string|Symbol", ActualType: v.Type(), Offset: off}
 }
 
 func findStructField(v reflect.Value, name string) reflect.Value {

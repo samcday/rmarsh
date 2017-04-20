@@ -74,5 +74,14 @@ type InvalidTypeError struct {
 }
 
 func (e InvalidTypeError) Error() string {
-	return fmt.Sprintf("Invalid type %s encountered at offset %d - expected %s", e.ActualType, e.Offset, e.ExpectedType)
+	return fmt.Sprintf("Invalid type %s encountered - expected %s (at offset %d)", e.ActualType, e.ExpectedType, e.Offset)
+}
+
+type UnresolvedLinkError struct {
+	Id     int64
+	Offset int64
+}
+
+func (e UnresolvedLinkError) Error() string {
+	return fmt.Sprintf("Invalid symlink id %d found (at offset %d)", e.Id, e.Offset)
 }
