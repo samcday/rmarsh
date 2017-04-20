@@ -65,16 +65,6 @@ func testRubyEncode(t *testing.T, payload string, v interface{}) {
 	if err := NewDecoder(bytes.NewReader(raw)).Decode(v); err != nil {
 		t.Fatalf("Decode() failed: %s\nRaw ruby encoded:\n%s", err, hex.Dump(raw))
 	}
-	/*
-		if expected != nil && reflect.TypeOf(expected).Kind() == reflect.Func {
-			if err := expected.(func(interface{}) error)(v); err != nil {
-				t.Errorf(fmt.Sprintf("%s\nRaw ruby encoded:\n%s\n", err.Error(), hex.Dump(raw)))
-			}
-		} else {
-			if !reflect.DeepEqual(v, expected) {
-				t.Errorf("Decode() gave %#v (%T), expected %#v\nRaw ruby encoded:\n%s\n", v, v, expected, hex.Dump(raw))
-			}
-		}*/
 }
 
 func TestDecodeNil(t *testing.T) {
@@ -227,6 +217,15 @@ func TestDecodeHashToStruct(t *testing.T) {
 	}
 }
 
+func TestDecodeString(t *testing.T) {
+	var str string
+	testRubyEncode(t, `"test"`, &str)
+
+	if str != "test" {
+		t.Errorf("Expected s to be test, got %s", str)
+	}
+}
+
 // func TestDecodeSymlink(t *testing.T) {
 // 	testRubyEncode(t, "[:test,:test]", []interface{}{Symbol("test"), Symbol("test")})
 // }
@@ -237,10 +236,6 @@ func TestDecodeHashToStruct(t *testing.T) {
 
 // func TestDecodeClass(t *testing.T) {
 // 	testRubyEncode(t, "Gem::Version", NewClass("Gem::Version"))
-// }
-
-// func TestDecodeString(t *testing.T) {
-// 	testRubyEncode(t, `"test"`, "test")
 // }
 
 // func TestDecodeInstance(t *testing.T) {

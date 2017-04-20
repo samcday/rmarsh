@@ -76,14 +76,14 @@ func (dec *Decoder) val(v reflect.Value) error {
 		return dec.symlink(v)
 	case TYPE_LINK:
 		return dec.link(v)
+	case TYPE_IVAR:
+		return dec.ivar(v)
+	case TYPE_STRING:
+		return dec.string(v)
 	// case TYPE_MODULE:
 	// 	return dec.module()
 	// case TYPE_CLASS:
 	// 	return dec.class()
-	// case TYPE_IVAR:
-	// 	return dec.ivar()
-	// case TYPE_STRING:
-	// 	return dec.rawstr()
 	// case TYPE_USRMARSHAL, TYPE_OBJECT:
 	// 	return dec.instance(typ == TYPE_USRMARSHAL)
 	default:
@@ -451,46 +451,41 @@ func (dec *Decoder) link(v reflect.Value) error {
 // 	return NewClass(str), nil
 // }
 
-// func (dec *Decoder) ivar() (interface{}, error) {
-// 	val, err := dec.val()
-// 	if err != nil {
-// 		return nil, err
-// 	}
+func (dec *Decoder) ivar(v reflect.Value) error {
+	if err := dec.val(v); err != nil {
+		return err
+	}
 
-// 	num, err := dec.num()
-// 	if err != nil {
-// 		return nil, err
-// 	}
+	sz, err := dec.long()
+	if err != nil {
+		return err
+	}
 
-// 	ivars := make(map[string]interface{}, num)
-// 	for i := 0; i < int(num); i++ {
-// 		k, err := dec.nextsym()
-// 		if err != nil {
-// 			return nil, err
-// 		}
-// 		v, err := dec.val()
-// 		if err != nil {
-// 			return nil, err
-// 		}
+	// TODO: come up with an idiomatic way to handle IVars...
+	// For now we're just throwing them away.
+	for i := 0; i < int(sz); i++ {
+		if err := dec.val(indirect(reflect.New(ifaceType))); err != nil {
+			return err
+		}
+		if err := dec.val(indirect(reflect.New(ifaceType))); err != nil {
+			return err
+		}
+	}
 
-// 		ivars[k] = v
-// 	}
+	return nil
+}
 
-// 	// If this is an ASCII/UTF-8 string and there's no other ivars associated
-// 	// Wee just unwrap and return the string itself.
-// 	if reflect.TypeOf(val).Name() == "string" && len(ivars) == 1 {
-// 		if _, found := ivars["E"]; found {
-// 			// It doesn't matter whether it's US-ASCII or UTF-8 proper. ASCII is a subset
-// 			// of UTF-8 so we can just pass it along unmolested.
-// 			return val, nil
-// 		}
-// 	}
+func (dec *Decoder) string(v reflect.Value) error {
+	off := dec.off
 
-// 	return &IVar{
-// 		Data:      val,
-// 		Variables: ivars,
-// 	}, nil
-// }
+	str, err := dec.rawstr()
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("eh %v\n", v.Type())
+	return setString(v, str, off)
+}
 
 // func (dec *Decoder) instance(usr bool) (*Instance, error) {
 // 	inst := new(Instance)
