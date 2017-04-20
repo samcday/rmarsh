@@ -15,7 +15,7 @@ import (
 type Decoder struct {
 	r        *bufio.Reader
 	off      int64
-	symCache map[int]*Symbol
+	symCache map[int]string
 	objCache map[int]reflect.Value
 }
 
@@ -29,7 +29,7 @@ func (dec *Decoder) Decode(v interface{}) error {
 		return fmt.Errorf("Invalid decode target %T", v)
 	}
 
-	dec.symCache = make(map[int]*Symbol)
+	dec.symCache = make(map[int]string)
 	dec.objCache = make(map[int]reflect.Value)
 	dec.off = 0
 
@@ -278,6 +278,8 @@ func (dec *Decoder) symbol(v reflect.Value) error {
 		return err
 	}
 
+	dec.symCache[len(dec.symCache)] = str
+
 	return setString(v, str, off)
 }
 
@@ -355,7 +357,7 @@ func (dec *Decoder) hash(v reflect.Value) error {
 		return InvalidTypeError{ExpectedType: "map", ActualType: v.Type(), Offset: off}
 	}
 
-	// 	dec.cacheObj(m)
+	dec.cacheObj(v)
 
 	return nil
 }
@@ -411,10 +413,10 @@ func (dec *Decoder) symlink(v reflect.Value) error {
 
 	sym, found := dec.symCache[int(id)]
 	if !found {
-		return UnresolvedLinkError{Id: id, Offset: off}
+		return UnresolvedLinkError{Type: "symbol", Id: id, Offset: off}
 	}
 
-	return setString(v, string(*sym), off)
+	return setString(v, sym, off)
 }
 
 func (dec *Decoder) link(v reflect.Value) error {
@@ -427,7 +429,7 @@ func (dec *Decoder) link(v reflect.Value) error {
 
 	_, found := dec.objCache[int(id)]
 	if !found {
-		return UnresolvedLinkError{Id: id, Offset: off}
+		return UnresolvedLinkError{Type: "instance", Id: id, Offset: off}
 	}
 
 	return fmt.Errorf("Object links currently unimplemented")
@@ -472,6 +474,8 @@ func (dec *Decoder) ivar(v reflect.Value) error {
 		}
 	}
 
+	dec.cacheObj(v)
+
 	return nil
 }
 
@@ -483,7 +487,6 @@ func (dec *Decoder) string(v reflect.Value) error {
 		return err
 	}
 
-	fmt.Printf("eh %v\n", v.Type())
 	return setString(v, str, off)
 }
 
@@ -582,10 +585,7 @@ func (dec *Decoder) rawstr() (string, error) {
 		return "", err
 	}
 
-	str := string(b)
-	// dec.cacheObj(str)
-
-	return str, nil
+	return string(b), nil
 }
 
 func (dec *Decoder) cacheObj(v reflect.Value) {

@@ -78,10 +78,11 @@ func (e InvalidTypeError) Error() string {
 }
 
 type UnresolvedLinkError struct {
+	Type   string
 	Id     int64
 	Offset int64
 }
 
 func (e UnresolvedLinkError) Error() string {
-	return fmt.Sprintf("Invalid symlink id %d found (at offset %d)", e.Id, e.Offset)
+	return fmt.Sprintf("Invalid %s symlink id %d found (at offset %d)", e.Type, e.Id, e.Offset)
 }
