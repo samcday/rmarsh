@@ -194,16 +194,38 @@ func TestDecodeArray(t *testing.T) {
 	if !reflect.DeepEqual(iparr, []*int{&v1, &v2}) {
 		t.Errorf(`Expected iparr to be [123, 321], got %s`, iparr)
 	}
-
-	// testRubyEncode(t, "[nil, true, false]", []interface{}{nil, true, false})
-	// testRubyEncode(t, "[[]]", []interface{}{[]interface{}{}})
 }
 
-// func TestDecodeHash(t *testing.T) {
-// 	testRubyEncode(t, "{:foo => 123}", map[interface{}]interface{}{
-// 		Symbol("foo"): int64(123),
-// 	})
-// }
+func TestDecodeHashToMap(t *testing.T) {
+	m := make(map[string][]*int)
+
+	testRubyEncode(t, "{:foo => [123]}", &m)
+	v := 123
+	if !reflect.DeepEqual(m, map[string][]*int{"foo": []*int{&v}}) {
+		t.Errorf(`Expected m to be {"foo": 123}, got %v`, m)
+	}
+}
+
+type nested struct {
+	Test int
+}
+type aStruct struct {
+	Foo ***int     `rmarsh:"foo"`
+	Bar [][][]bool `rmarsh:"bar"`
+	// Quux nested
+}
+
+func TestDecodeHashToStruct(t *testing.T) {
+	var st aStruct
+	testRubyEncode(t, `{:foo => 123, :bar => [[[true]]]}`, &st)
+
+	if ***st.Foo != 123 {
+		t.Errorf("Expected st.Foo to equal 123, got %v", st.Foo)
+	}
+	if !reflect.DeepEqual(st.Bar, [][][]bool{{{true}}}) {
+		t.Errorf("Expected st.Bar to equal [[[true]]], got %v", st.Bar)
+	}
+}
 
 // func TestDecodeSymlink(t *testing.T) {
 // 	testRubyEncode(t, "[:test,:test]", []interface{}{Symbol("test"), Symbol("test")})

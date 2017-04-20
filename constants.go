@@ -38,4 +38,7 @@ var (
 
 	bigIntType   = reflect.TypeOf(*big.NewInt(0))
 	bigFloatType = reflect.TypeOf(*big.NewFloat(0))
+
+	ifaceType  = reflect.TypeOf(new(interface{})).Elem()
+	stringType = reflect.TypeOf("")
 )

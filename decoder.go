@@ -70,8 +70,8 @@ func (dec *Decoder) val(v reflect.Value) error {
 		return dec.symbol(v)
 	case TYPE_ARRAY:
 		return dec.array(v)
-	// case TYPE_HASH:
-	// 	return dec.hash()
+	case TYPE_HASH:
+		return dec.hash(v)
 	// case TYPE_SYMLINK:
 	// 	return dec.symlink()
 	// case TYPE_MODULE:
@@ -309,8 +309,7 @@ func (dec *Decoder) array(v reflect.Value) error {
 		// Holy shit. This is the hackiest crap I've ever written.
 		// If we've encountered an array but the target type is interface{}
 		// then we construct a slice of type interface{}.
-		ifaceT := reflect.TypeOf(new(interface{})).Elem()
-		newSlice := reflect.MakeSlice(reflect.SliceOf(ifaceT), sz, sz)
+		newSlice := reflect.MakeSlice(reflect.SliceOf(ifaceType), sz, sz)
 		v.Set(newSlice)
 		v = newSlice
 	case reflect.Array:
@@ -339,30 +338,79 @@ func (dec *Decoder) array(v reflect.Value) error {
 	return nil
 }
 
-// func (dec *Decoder) hash() (interface{}, error) {
-// 	sz, err := dec.num()
-// 	if err != nil {
-// 		return nil, err
-// 	}
+func (dec *Decoder) hash(v reflect.Value) error {
+	off := dec.off
+	sz, err := dec.long()
+	if err != nil {
+		return err
+	}
 
-// 	m := make(map[interface{}]interface{}, sz)
+	switch v.Kind() {
+	case reflect.Interface:
+		if v.NumMethod() > 0 {
+			return InvalidTypeError{ExpectedType: "map", ActualType: v.Type(), Offset: off}
+		}
+		newMap := reflect.MakeMap(reflect.MapOf(ifaceType, ifaceType))
+		v.Set(newMap)
+		v = newMap
+		fallthrough
+	case reflect.Map:
+		if err := dec.hashMap(v, int(sz)); err != nil {
+			return err
+		}
+	case reflect.Struct:
+		if err := dec.hashStruct(v, int(sz)); err != nil {
+			return err
+		}
+	default:
+		return InvalidTypeError{ExpectedType: "map", ActualType: v.Type(), Offset: off}
+	}
 
-// 	for i := 0; i < int(sz); i++ {
-// 		k, err := dec.val()
-// 		if err != nil {
-// 			return nil, err
-// 		}
-// 		v, err := dec.val()
-// 		if err != nil {
-// 			return nil, err
-// 		}
-// 		m[k] = v
-// 	}
+	// 	dec.cacheObj(m)
 
-// 	dec.cacheObj(m)
+	return nil
+}
 
-// 	return m, nil
-// }
+func (dec *Decoder) hashMap(v reflect.Value, sz int) error {
+	for i := 0; i < sz; i++ {
+		rk := reflect.New(v.Type().Key())
+		rv := reflect.New(v.Type().Elem())
+
+		if err := dec.val(rk.Elem()); err != nil {
+			return err
+		}
+		if err := dec.val(rv.Elem()); err != nil {
+			return err
+		}
+
+		v.SetMapIndex(rk.Elem(), rv.Elem())
+	}
+	return nil
+}
+
+func (dec *Decoder) hashStruct(v reflect.Value, sz int) error {
+	for i := 0; i < sz; i++ {
+		rk := reflect.New(stringType)
+		if err := dec.val(rk.Elem()); err != nil {
+			return err
+		}
+
+		f := findStructField(v, rk.Elem().String())
+		if !f.IsValid() {
+			// Create an interface variable to hold whatever we deserialize as the value
+			// then throw it away.
+			if err := dec.val(indirect(reflect.New(ifaceType))); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if err := dec.val(indirect(f)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // func (dec *Decoder) symlink() (Symbol, error) {
 // 	id, err := dec.num()
@@ -580,4 +628,19 @@ func indirect(v reflect.Value) reflect.Value {
 	}
 
 	return v
+}
+
+func findStructField(v reflect.Value, name string) reflect.Value {
+	f := v.FieldByName(name)
+	if f.IsValid() {
+		return f
+	}
+
+	for i := 0; i < v.NumField(); i++ {
+		if v.Type().Field(i).Tag.Get("rmarsh") == name {
+			return v.Field(i)
+		}
+	}
+
+	return reflect.Value{}
 }
