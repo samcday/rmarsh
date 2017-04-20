@@ -354,21 +354,34 @@ func (enc *Encoder) strct(v reflect.Value) error {
 		return err
 	}
 
-	t := v.Type()
-	if err := enc.write(encodeNum(t.NumField())); err != nil {
-		return err
+	var fields []struct {
+		index []int
+		name  string
 	}
+	t := v.Type()
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
+		if f.PkgPath != "" {
+			// We only want exported fields.
+			continue
+		}
 		name := f.Tag.Get("rmarsh")
 		if name == "" {
 			name = f.Name
 		}
-
-		if err := enc.symbol(Symbol(name)); err != nil {
+		fields = append(fields, struct {
+			index []int
+			name  string
+		}{f.Index, name})
+	}
+	if err := enc.write(encodeNum(len(fields))); err != nil {
+		return err
+	}
+	for _, f := range fields {
+		if err := enc.symbol(Symbol(f.name)); err != nil {
 			return err
 		}
-		if err := enc.val(v.FieldByIndex(f.Index).Interface()); err != nil {
+		if err := enc.val(v.FieldByIndex(f.index).Interface()); err != nil {
 			return err
 		}
 	}
