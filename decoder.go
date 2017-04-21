@@ -292,6 +292,7 @@ func (dec *Decoder) array(v reflect.Value) error {
 	}
 
 	sz := int(szl)
+	var isStruct bool
 
 	switch v.Kind() {
 	case reflect.Interface:
@@ -314,13 +315,44 @@ func (dec *Decoder) array(v reflect.Value) error {
 	case reflect.Slice:
 		// Need to initialize a "proper" slice with the type the original slice is using.
 		v.Set(reflect.MakeSlice(reflect.SliceOf(v.Type().Elem()), sz, sz))
+	case reflect.Struct:
+		// Is this a compatible struct?
+		desc, found := v.Type().FieldByName("_")
+		if !found {
+			return InvalidTypeError{ExpectedType: "slice|array", ActualType: v.Type(), Offset: off}
+		}
+		fmt.Println(desc.Tag.Get("rmarsh"))
+		if desc.Tag == "rmarsh_indexed" {
+			isStruct = true
+		} else {
+			return InvalidTypeError{ExpectedType: "slice|array", ActualType: v.Type(), Offset: off}
+		}
 	default:
 		return InvalidTypeError{ExpectedType: "slice|array", ActualType: v.Type(), Offset: off}
 	}
 
+	var fieldIdx int
 	for i := 0; i < int(sz); i++ {
-		if err := dec.val(indirect(v.Index(i))); err != nil {
-			return err
+		if isStruct {
+			// If the target is an indexed struct, we unpack the values into each
+			// exported field, in the order they're declared in the original struct.
+			for fieldIdx < v.NumField() {
+				if v.Type().Field(fieldIdx).PkgPath == "" {
+					break
+				}
+				fieldIdx++
+			}
+			if fieldIdx == v.NumField() {
+				return IndexedStructOverflowError{Num: i, Expected: int(sz), Offset: dec.off}
+			}
+			if err := dec.val(indirect(v.Field(fieldIdx))); err != nil {
+				return err
+			}
+			fieldIdx++
+		} else {
+			if err := dec.val(indirect(v.Index(i))); err != nil {
+				return err
+			}
 		}
 	}
 

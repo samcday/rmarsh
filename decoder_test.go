@@ -1,4 +1,4 @@
-package rmarsh
+package rmarsh_test
 
 import (
 	"bufio"
@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"reflect"
 	"testing"
+
+	"github.com/samcday/rmarsh"
 )
 
 var (
@@ -62,7 +64,7 @@ func testRubyEncode(t *testing.T, payload string, v interface{}) {
 
 	rubyDecOut.Scan()
 	raw := rubyDecOut.Bytes()
-	if err := NewDecoder(bytes.NewReader(raw)).Decode(v); err != nil {
+	if err := rmarsh.NewDecoder(bytes.NewReader(raw)).Decode(v); err != nil {
 		t.Fatalf("Decode() failed: %s\nRaw ruby encoded:\n%s", err, hex.Dump(raw))
 	}
 }
@@ -157,7 +159,7 @@ func TestDecodeSymbol(t *testing.T) {
 		t.Errorf("Expected str to be 'test', got %s", str)
 	}
 
-	var sym *Symbol
+	var sym *rmarsh.Symbol
 	testRubyEncode(t, ":testsym", &sym)
 	if *sym != "testsym" {
 		t.Errorf("Expected sym to be 'testsym', got %s", *sym)
@@ -183,6 +185,20 @@ func TestDecodeArray(t *testing.T) {
 	v2 := 321
 	if !reflect.DeepEqual(iparr, []*int{&v1, &v2}) {
 		t.Errorf(`Expected iparr to be [123, 321], got %s`, iparr)
+	}
+}
+
+type decodeFromArray struct {
+	_   struct{} `rmarsh_indexed`
+	Foo string
+	Bar int
+}
+
+func TestDecodeArrayToStruct(t *testing.T) {
+	var d decodeFromArray
+	testRubyEncode(t, `["test", 123]`, &d)
+	if !reflect.DeepEqual(d, decodeFromArray{struct{}{}, "test", 123}) {
+		t.Errorf(`Expected d to be {"test", 123}, got %v`, d)
 	}
 }
 
