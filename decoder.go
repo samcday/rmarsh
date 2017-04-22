@@ -86,10 +86,10 @@ func (dec *Decoder) val(v reflect.Value) error {
 		return dec.ivar(v)
 	case TYPE_STRING:
 		return dec.string(v)
-	// case TYPE_MODULE:
-	// 	return dec.module()
-	// case TYPE_CLASS:
-	// 	return dec.class()
+	case TYPE_MODULE:
+		return dec.module(v)
+	case TYPE_CLASS:
+		return dec.class(v)
 	// case TYPE_USRMARSHAL, TYPE_OBJECT:
 	// 	return dec.instance(typ == TYPE_USRMARSHAL)
 	default:
@@ -290,7 +290,7 @@ func (dec *Decoder) symbol(v reflect.Value) error {
 
 	dec.symCache[len(dec.symCache)] = str
 
-	return setString(v, str, off)
+	return setString(v, str, off, symbolType)
 }
 
 func (dec *Decoder) array(v reflect.Value) error {
@@ -462,7 +462,7 @@ func (dec *Decoder) symlink(v reflect.Value) error {
 		return UnresolvedLinkError{Type: "symbol", Id: id, Offset: off}
 	}
 
-	return setString(v, sym, off)
+	return setString(v, sym, off, symbolType)
 }
 
 func (dec *Decoder) link(v reflect.Value) error {
@@ -493,23 +493,35 @@ func (dec *Decoder) link(v reflect.Value) error {
 	return nil
 }
 
-// func (dec *Decoder) module() (*Module, error) {
-// 	str, err := dec.rawstr()
-// 	if err != nil {
-// 		return nil, err
-// 	}
+func (dec *Decoder) module(v reflect.Value) error {
+	off := dec.off
+	objId := dec.markObj(TYPE_MODULE)
 
-// 	return NewModule(str), nil
-// }
+	str, err := dec.rawstr()
+	if err != nil {
+		return err
+	}
 
-// func (dec *Decoder) class() (*Class, error) {
-// 	str, err := dec.rawstr()
-// 	if err != nil {
-// 		return nil, err
-// 	}
+	setString(v, str, off, moduleType)
+	dec.cacheObj(objId, v)
 
-// 	return NewClass(str), nil
-// }
+	return nil
+}
+
+func (dec *Decoder) class(v reflect.Value) error {
+	off := dec.off
+	objId := dec.markObj(TYPE_CLASS)
+
+	str, err := dec.rawstr()
+	if err != nil {
+		return err
+	}
+
+	setString(v, str, off, classType)
+	dec.cacheObj(objId, v)
+
+	return nil
+}
 
 func (dec *Decoder) ivar(v reflect.Value) error {
 	objId := dec.markObj(TYPE_IVAR)
@@ -704,19 +716,31 @@ func indirect(v reflect.Value) reflect.Value {
 	return v
 }
 
-func setString(v reflect.Value, str string, off int64) error {
+func setString(v reflect.Value, str string, off int64, types ...reflect.Type) error {
+	expType := "string"
+	for _, t := range types {
+		expType = fmt.Sprintf("%s|%s", t.String())
+	}
+
 	switch v.Kind() {
 	case reflect.String:
-		v.SetString(str)
-		return nil
+		if v.Type() == stringType {
+			v.SetString(str)
+			return nil
+		}
+		for _, t := range types {
+			if v.Type() == t {
+				v.SetString(str)
+				return nil
+			}
+		}
 	case reflect.Interface:
 		if v.NumMethod() == 0 {
 			v.Set(reflect.ValueOf(str))
 			return nil
 		}
 	}
-
-	return InvalidTypeError{ExpectedType: "string|Symbol", ActualType: v.Type(), Offset: off}
+	return InvalidTypeError{ExpectedType: expType, ActualType: v.Type(), Offset: off}
 }
 
 func findStructField(v reflect.Value, name string) reflect.Value {

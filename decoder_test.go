@@ -251,35 +251,34 @@ func TestDecodeLink(t *testing.T) {
 	}
 }
 
-// func TestDecodeSymlink(t *testing.T) {
-// 	testRubyEncode(t, "[:test,:test]", []interface{}{Symbol("test"), Symbol("test")})
-// }
+func TestDecodeSymlink(t *testing.T) {
+	var syms []rmarsh.Symbol
+	testRubyEncode(t, "[:test,:test]", &syms)
+	if syms[0] != syms[1] {
+		t.Errorf("Expected syms[0] to equal syms[1]")
+	}
+}
 
-// func TestDecodeModule(t *testing.T) {
-// 	testRubyEncode(t, "Process", NewModule("Process"))
-// }
+func TestDecodeModule(t *testing.T) {
+	var mod rmarsh.Module
+	testRubyEncode(t, "Process", &mod)
+	if mod != "Process" {
+		t.Errorf("Expected mod to equal Process")
+	}
+}
 
-// func TestDecodeClass(t *testing.T) {
-// 	testRubyEncode(t, "Gem::Version", NewClass("Gem::Version"))
-// }
+func TestDecodeClass(t *testing.T) {
+	var cl rmarsh.Class
+	testRubyEncode(t, "Gem::Version", &cl)
+	if cl != "Gem::Version" {
+		t.Errorf("Expected cl to equal Gem::Version")
+	}
+}
 
 // func TestDecodeInstance(t *testing.T) {
 // 	testRubyEncode(t, `Gem::Version.new("1.2.3")`, &Instance{
 // 		Name:           "Gem::Version",
 // 		UserMarshalled: true,
 // 		Data:           []interface{}{"1.2.3"},
-// 	})
-// }
-
-// func TestDecodeLink(t *testing.T) {
-// 	testRubyEncode(t, `u = Gem::Version.new("1.2.3"); [u,u]`, func(v interface{}) error {
-// 		arr, ok := v.([]interface{})
-// 		if !ok {
-// 			return fmt.Errorf("Unexpected type %T", v)
-// 		}
-// 		if arr[0] != arr[1] {
-// 			return fmt.Errorf("%v (%T) != %v (%T)", arr[0], arr[0], arr[1], arr[1])
-// 		}
-// 		return nil
 // 	})
 // }

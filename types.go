@@ -13,19 +13,9 @@ type Symbol string
 // https://ruby-doc.org/core-2.4.0/Class.html
 type Class string
 
-func NewClass(s string) *Class {
-	class := Class(s)
-	return &class
-}
-
 // Module represents a reference to a Ruby Module
 // https://ruby-doc.org/core-2.4.0/Module.html
 type Module string
-
-func NewModule(s string) *Module {
-	mod := Module(s)
-	return &mod
-}
 
 // Instance represents an instance of a Ruby class.
 // If the Instance is not user marshalled (runtime class has marshal_dump/marshal_load method)
