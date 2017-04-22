@@ -2,6 +2,7 @@ package rmarsh
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -13,10 +14,14 @@ import (
 )
 
 type Decoder struct {
-	r        *bufio.Reader
-	off      int64
-	symCache map[int]string
-	objCache map[int]reflect.Value
+	r         *bufio.Reader
+	off       int64
+	symCache  map[int]string
+	objCache  map[int]reflect.Value
+	bufCache  map[int]*bytes.Buffer
+	objId     int
+	copyBuf   *bytes.Buffer
+	replayBuf *bytes.Buffer
 }
 
 func NewDecoder(r io.Reader) *Decoder {
@@ -31,6 +36,7 @@ func (dec *Decoder) Decode(v interface{}) error {
 
 	dec.symCache = make(map[int]string)
 	dec.objCache = make(map[int]reflect.Value)
+	dec.bufCache = make(map[int]*bytes.Buffer)
 	dec.off = 0
 
 	m, err := dec.uint16("magic")
@@ -194,12 +200,16 @@ func (dec *Decoder) fixnum(v reflect.Value) error {
 }
 
 func (dec *Decoder) float(v reflect.Value) error {
+	objId := dec.markObj(TYPE_FLOAT)
+
 	off := dec.off
 
 	str, err := dec.rawstr()
 	if err != nil {
 		return err
 	}
+
+	dec.cacheObj(objId, v)
 
 	f, err := strconv.ParseFloat(str, 64)
 	if err != nil {
@@ -284,6 +294,8 @@ func (dec *Decoder) symbol(v reflect.Value) error {
 }
 
 func (dec *Decoder) array(v reflect.Value) error {
+	objId := dec.markObj(TYPE_ARRAY)
+
 	off := dec.off
 
 	szl, err := dec.long()
@@ -356,12 +368,14 @@ func (dec *Decoder) array(v reflect.Value) error {
 		}
 	}
 
-	dec.cacheObj(v)
+	dec.cacheObj(objId, v)
 
 	return nil
 }
 
 func (dec *Decoder) hash(v reflect.Value) error {
+	objId := dec.markObj(TYPE_HASH)
+
 	off := dec.off
 	sz, err := dec.long()
 	if err != nil {
@@ -389,7 +403,7 @@ func (dec *Decoder) hash(v reflect.Value) error {
 		return InvalidTypeError{ExpectedType: "map", ActualType: v.Type(), Offset: off}
 	}
 
-	dec.cacheObj(v)
+	dec.cacheObj(objId, v)
 
 	return nil
 }
@@ -459,12 +473,24 @@ func (dec *Decoder) link(v reflect.Value) error {
 		return err
 	}
 
-	_, found := dec.objCache[int(id)]
+	inst, found := dec.objCache[int(id)]
 	if !found {
 		return UnresolvedLinkError{Type: "instance", Id: id, Offset: off}
 	}
 
-	return fmt.Errorf("Object links currently unimplemented")
+	// If this instance can be assigned straight to the target, we do that now.
+	if inst.Type().AssignableTo(v.Type()) {
+		v.Set(inst)
+		return nil
+	}
+
+	// Otherwise, we start replaying the raw bytes for this obj.
+	dec.replayBuf = dec.bufCache[int(id)]
+	if err := dec.val(v); err != nil {
+		return err
+	}
+	dec.replayBuf = nil
+	return nil
 }
 
 // func (dec *Decoder) module() (*Module, error) {
@@ -486,6 +512,8 @@ func (dec *Decoder) link(v reflect.Value) error {
 // }
 
 func (dec *Decoder) ivar(v reflect.Value) error {
+	objId := dec.markObj(TYPE_IVAR)
+
 	if err := dec.val(v); err != nil {
 		return err
 	}
@@ -506,7 +534,7 @@ func (dec *Decoder) ivar(v reflect.Value) error {
 		}
 	}
 
-	dec.cacheObj(v)
+	dec.cacheObj(objId, v)
 
 	return nil
 }
@@ -584,6 +612,9 @@ func (dec *Decoder) byte(op string) (byte, error) {
 	if err != nil {
 		return 0, errors.Wrap(err, fmt.Sprintf("Error while reading %s", op))
 	}
+	if dec.copyBuf != nil {
+		dec.copyBuf.WriteByte(b)
+	}
 	dec.off++
 	return b, nil
 }
@@ -591,8 +622,20 @@ func (dec *Decoder) byte(op string) (byte, error) {
 func (dec *Decoder) bytes(sz int64, op string) ([]byte, error) {
 	b := make([]byte, sz)
 
+	if dec.replayBuf != nil {
+		if n, err := dec.replayBuf.Read(b); err != nil {
+			return nil, errors.Wrap(err, fmt.Sprintf("Error while reading %s", op))
+		} else if n != int(sz) {
+			return nil, fmt.Errorf("Underflow reading replayBuf for %s", op)
+		}
+		return b, nil
+	}
+
 	if _, err := io.ReadFull(dec.r, b); err != nil {
 		return nil, errors.Wrap(err, fmt.Sprintf("Error while reading %s", op))
+	}
+	if dec.copyBuf != nil {
+		dec.copyBuf.Write(b)
 	}
 	dec.off += sz
 	return b, nil
@@ -620,8 +663,17 @@ func (dec *Decoder) rawstr() (string, error) {
 	return string(b), nil
 }
 
-func (dec *Decoder) cacheObj(v reflect.Value) {
-	dec.objCache[len(dec.objCache)] = v
+func (dec *Decoder) markObj(typ byte) int {
+	dec.copyBuf = new(bytes.Buffer)
+	dec.copyBuf.WriteByte(typ)
+	dec.objId++
+	return dec.objId - 1
+}
+
+func (dec *Decoder) cacheObj(id int, v reflect.Value) {
+	dec.objCache[id] = v
+	dec.bufCache[id] = dec.copyBuf
+	dec.copyBuf = nil
 }
 
 func (dec *Decoder) error(msg string) error {

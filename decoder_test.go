@@ -242,6 +242,15 @@ func TestDecodeString(t *testing.T) {
 	}
 }
 
+func TestDecodeLink(t *testing.T) {
+	var i []interface{}
+	testRubyEncode(t, `[a = "test", a]`, &i)
+
+	if i[0] != i[1] {
+		t.Errorf("Expected i[0] to equal i[1]")
+	}
+}
+
 // func TestDecodeSymlink(t *testing.T) {
 // 	testRubyEncode(t, "[:test,:test]", []interface{}{Symbol("test"), Symbol("test")})
 // }
