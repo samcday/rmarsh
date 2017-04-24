@@ -24,6 +24,7 @@ const (
 	TYPE_OBJECT     = 'o'
 	TYPE_LINK       = '@'
 	TYPE_USRMARSHAL = 'U'
+	TYPE_USRDEF     = 'u'
 )
 
 var (

@@ -2,7 +2,6 @@ package rmarsh
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -14,14 +13,11 @@ import (
 )
 
 type Decoder struct {
-	r         *bufio.Reader
-	off       int64
-	symCache  map[int]string
-	objCache  map[int]reflect.Value
-	bufCache  map[int]*bytes.Buffer
-	objId     int
-	copyBuf   *bytes.Buffer
-	replayBuf *bytes.Buffer
+	r        *bufio.Reader
+	off      int64
+	symCache map[int]string
+	objCache map[int]reflect.Value
+	objId    int
 }
 
 func NewDecoder(r io.Reader) *Decoder {
@@ -36,7 +32,6 @@ func (dec *Decoder) Decode(v interface{}) error {
 
 	dec.symCache = make(map[int]string)
 	dec.objCache = make(map[int]reflect.Value)
-	dec.bufCache = make(map[int]*bytes.Buffer)
 	dec.off = 0
 
 	m, err := dec.uint16("magic")
@@ -90,8 +85,8 @@ func (dec *Decoder) val(v reflect.Value) error {
 		return dec.module(v)
 	case TYPE_CLASS:
 		return dec.class(v)
-	// case TYPE_USRMARSHAL, TYPE_OBJECT:
-	// 	return dec.instance(typ == TYPE_USRMARSHAL)
+	case TYPE_USRMARSHAL, TYPE_OBJECT, TYPE_USRDEF:
+		return dec.instance(v, typ)
 	default:
 		return dec.error(fmt.Sprintf("Unknown type %X", typ))
 	}
@@ -200,8 +195,6 @@ func (dec *Decoder) fixnum(v reflect.Value) error {
 }
 
 func (dec *Decoder) float(v reflect.Value) error {
-	objId := dec.markObj(TYPE_FLOAT)
-
 	off := dec.off
 
 	str, err := dec.rawstr()
@@ -209,7 +202,7 @@ func (dec *Decoder) float(v reflect.Value) error {
 		return err
 	}
 
-	dec.cacheObj(objId, v)
+	dec.cacheObj(v)
 
 	f, err := strconv.ParseFloat(str, 64)
 	if err != nil {
@@ -229,12 +222,12 @@ func (dec *Decoder) float(v reflect.Value) error {
 		}
 		v.SetFloat(f)
 		return nil
-	}
-
-	if v.Kind() == reflect.Struct && v.Type() == bigFloatType {
-		bigf := v.Addr().Interface().(*big.Float)
-		bigf.SetFloat64(f)
-		return nil
+	case reflect.Struct:
+		if v.Type() == bigFloatType {
+			bigf := v.Addr().Interface().(*big.Float)
+			bigf.SetFloat64(f)
+			return nil
+		}
 	}
 
 	return InvalidTypeError{ExpectedType: "float", ActualType: v.Type(), Offset: off}
@@ -294,8 +287,6 @@ func (dec *Decoder) symbol(v reflect.Value) error {
 }
 
 func (dec *Decoder) array(v reflect.Value) error {
-	objId := dec.markObj(TYPE_ARRAY)
-
 	off := dec.off
 
 	szl, err := dec.long()
@@ -343,6 +334,8 @@ func (dec *Decoder) array(v reflect.Value) error {
 		return InvalidTypeError{ExpectedType: "slice|array", ActualType: v.Type(), Offset: off}
 	}
 
+	dec.cacheObj(v)
+
 	var fieldIdx int
 	for i := 0; i < int(sz); i++ {
 		if isStruct {
@@ -368,14 +361,10 @@ func (dec *Decoder) array(v reflect.Value) error {
 		}
 	}
 
-	dec.cacheObj(objId, v)
-
 	return nil
 }
 
 func (dec *Decoder) hash(v reflect.Value) error {
-	objId := dec.markObj(TYPE_HASH)
-
 	off := dec.off
 	sz, err := dec.long()
 	if err != nil {
@@ -392,20 +381,20 @@ func (dec *Decoder) hash(v reflect.Value) error {
 		v = newMap
 		fallthrough
 	case reflect.Map:
+		dec.cacheObj(v)
 		if err := dec.hashMap(v, int(sz)); err != nil {
 			return err
 		}
+		return nil
 	case reflect.Struct:
+		dec.cacheObj(v)
 		if err := dec.hashStruct(v, int(sz)); err != nil {
 			return err
 		}
-	default:
-		return InvalidTypeError{ExpectedType: "map", ActualType: v.Type(), Offset: off}
+		return nil
 	}
 
-	dec.cacheObj(objId, v)
-
-	return nil
+	return InvalidTypeError{ExpectedType: "map", ActualType: v.Type(), Offset: off}
 }
 
 func (dec *Decoder) hashMap(v reflect.Value, sz int) error {
@@ -478,24 +467,18 @@ func (dec *Decoder) link(v reflect.Value) error {
 		return UnresolvedLinkError{Type: "instance", Id: id, Offset: off}
 	}
 
-	// If this instance can be assigned straight to the target, we do that now.
-	if inst.Type().AssignableTo(v.Type()) {
-		v.Set(inst)
-		return nil
+	if !inst.Type().AssignableTo(v.Type()) {
+		return InvalidTypeError{ExpectedType: inst.Type().String(), ActualType: v.Type(), Offset: off}
 	}
 
-	// Otherwise, we start replaying the raw bytes for this obj.
-	dec.replayBuf = dec.bufCache[int(id)]
-	if err := dec.val(v); err != nil {
-		return err
-	}
-	dec.replayBuf = nil
+	v.Set(inst)
+	return nil
+
 	return nil
 }
 
 func (dec *Decoder) module(v reflect.Value) error {
 	off := dec.off
-	objId := dec.markObj(TYPE_MODULE)
 
 	str, err := dec.rawstr()
 	if err != nil {
@@ -503,14 +486,13 @@ func (dec *Decoder) module(v reflect.Value) error {
 	}
 
 	setString(v, str, off, moduleType)
-	dec.cacheObj(objId, v)
+	dec.cacheObj(v)
 
 	return nil
 }
 
 func (dec *Decoder) class(v reflect.Value) error {
 	off := dec.off
-	objId := dec.markObj(TYPE_CLASS)
 
 	str, err := dec.rawstr()
 	if err != nil {
@@ -518,13 +500,14 @@ func (dec *Decoder) class(v reflect.Value) error {
 	}
 
 	setString(v, str, off, classType)
-	dec.cacheObj(objId, v)
+	dec.cacheObj(v)
 
 	return nil
 }
 
 func (dec *Decoder) ivar(v reflect.Value) error {
-	objId := dec.markObj(TYPE_IVAR)
+	id := len(dec.objCache)
+	dec.objCache[id] = reflect.Value{}
 
 	if err := dec.val(v); err != nil {
 		return err
@@ -546,7 +529,7 @@ func (dec *Decoder) ivar(v reflect.Value) error {
 		}
 	}
 
-	dec.cacheObj(objId, v)
+	dec.objCache[id] = v
 
 	return nil
 }
@@ -562,49 +545,55 @@ func (dec *Decoder) string(v reflect.Value) error {
 	return setString(v, str, off)
 }
 
-// func (dec *Decoder) instance(usr bool) (*Instance, error) {
-// 	inst := new(Instance)
-// 	var err error
+func (dec *Decoder) instance(v reflect.Value, typ byte) error {
+	inst := new(Instance)
 
-// 	inst.UserMarshalled = usr
-// 	if inst.Name, err = dec.nextsym(); err != nil {
-// 		return nil, err
-// 	}
+	inst.UserMarshalled = typ == TYPE_USRMARSHAL
+	inst.UserDefined = typ == TYPE_USRDEF
 
-// 	dec.cacheObj(inst)
+	if err := dec.val(reflect.ValueOf(&inst.Name).Elem()); err != nil {
+		return err
+	}
 
-// 	if usr {
-// 		val, err := dec.val()
-// 		if err != nil {
-// 			return nil, err
-// 		}
-// 		inst.Data = val
-// 	}
+	// dec.cacheObj(inst)
 
-// 	if !usr {
-// 		sz, err := dec.num()
-// 		if err != nil {
-// 			return nil, err
-// 		}
-// 		inst.InstanceVars = make(map[string]interface{})
+	switch typ {
+	case TYPE_USRMARSHAL:
+		if err := dec.val(reflect.ValueOf(&inst.Data).Elem()); err != nil {
+			return err
+		}
+	case TYPE_USRDEF:
+		str, err := dec.rawstr()
+		if err != nil {
+			return err
+		}
+		inst.Data = str
+	case TYPE_OBJECT:
+		sz, err := dec.long()
+		if err != nil {
+			return err
+		}
+		inst.InstanceVars = make(map[string]interface{})
 
-// 		for i := 0; i < int(sz); i++ {
-// 			key, err := dec.nextsym()
-// 			if err != nil {
-// 				return nil, err
-// 			}
+		for i := 0; i < int(sz); i++ {
+			var key Symbol
+			if err := dec.val(reflect.ValueOf(&key).Elem()); err != nil {
+				return err
+			}
 
-// 			val, err := dec.val()
-// 			if err != nil {
-// 				return nil, err
-// 			}
+			var val interface{}
+			if err := dec.val(reflect.ValueOf(&val).Elem()); err != nil {
+				return err
+			}
 
-// 			inst.InstanceVars[key] = val
-// 		}
-// 	}
+			inst.InstanceVars[string(key)] = val
+		}
+	}
 
-// 	return inst, nil
-// }
+	v.Set(reflect.ValueOf(inst).Elem())
+
+	return nil
+}
 
 // // Expects next value in stream to be a Symbol and returns the string repr of it.
 // func (dec *Decoder) nextsym() (string, error) {
@@ -624,9 +613,6 @@ func (dec *Decoder) byte(op string) (byte, error) {
 	if err != nil {
 		return 0, errors.Wrap(err, fmt.Sprintf("Error while reading %s", op))
 	}
-	if dec.copyBuf != nil {
-		dec.copyBuf.WriteByte(b)
-	}
 	dec.off++
 	return b, nil
 }
@@ -634,20 +620,8 @@ func (dec *Decoder) byte(op string) (byte, error) {
 func (dec *Decoder) bytes(sz int64, op string) ([]byte, error) {
 	b := make([]byte, sz)
 
-	if dec.replayBuf != nil {
-		if n, err := dec.replayBuf.Read(b); err != nil {
-			return nil, errors.Wrap(err, fmt.Sprintf("Error while reading %s", op))
-		} else if n != int(sz) {
-			return nil, fmt.Errorf("Underflow reading replayBuf for %s", op)
-		}
-		return b, nil
-	}
-
 	if _, err := io.ReadFull(dec.r, b); err != nil {
 		return nil, errors.Wrap(err, fmt.Sprintf("Error while reading %s", op))
-	}
-	if dec.copyBuf != nil {
-		dec.copyBuf.Write(b)
 	}
 	dec.off += sz
 	return b, nil
@@ -675,17 +649,8 @@ func (dec *Decoder) rawstr() (string, error) {
 	return string(b), nil
 }
 
-func (dec *Decoder) markObj(typ byte) int {
-	dec.copyBuf = new(bytes.Buffer)
-	dec.copyBuf.WriteByte(typ)
-	dec.objId++
-	return dec.objId - 1
-}
-
-func (dec *Decoder) cacheObj(id int, v reflect.Value) {
-	dec.objCache[id] = v
-	dec.bufCache[id] = dec.copyBuf
-	dec.copyBuf = nil
+func (dec *Decoder) cacheObj(v reflect.Value) {
+	dec.objCache[len(dec.objCache)] = v
 }
 
 func (dec *Decoder) error(msg string) error {
