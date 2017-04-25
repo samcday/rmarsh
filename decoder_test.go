@@ -1,69 +1,18 @@
 package rmarsh_test
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/hex"
-	"fmt"
-	"io"
 	"math/big"
-	"os"
-	"os/exec"
 	"reflect"
 	"testing"
 
 	"github.com/samcday/rmarsh"
 )
 
-var (
-	rubyDec    *exec.Cmd
-	rubyDecOut *bufio.Scanner
-	rubyDecIn  io.Writer
-)
-
-var streamDelim = []byte("$$END$$")
-
-func scanStream(data []byte, atEOF bool) (advance int, token []byte, err error) {
-	if len(data) >= 7 {
-		for i := 0; i <= len(data)-7; i++ {
-			if bytes.Compare(data[i:i+7], streamDelim) == 0 {
-				return i + 7, data[0:i], nil
-			}
-		}
-	}
-	return 0, nil, nil
-}
-
 func testRubyEncode(t *testing.T, payload string, v interface{}) {
-	if rubyDec == nil {
-		rubyDec = exec.Command("ruby", "decoder_test.rb")
-		// Send stderr to top level so it's obvious if the Ruby script blew up somehow.
-		rubyDec.Stderr = os.Stdout
+	raw := rbEncode(t, payload)
 
-		stdout, err := rubyDec.StdoutPipe()
-		if err != nil {
-			panic(err)
-		}
-		stdin, err := rubyDec.StdinPipe()
-		if err != nil {
-			panic(err)
-		}
-		if err := rubyDec.Start(); err != nil {
-			panic(err)
-		}
-
-		rubyDecOut = bufio.NewScanner(stdout)
-		rubyDecOut.Split(scanStream)
-		rubyDecIn = stdin
-	}
-
-	_, err := io.WriteString(rubyDecIn, fmt.Sprintf("%s\n", payload))
-	if err != nil {
-		panic(err)
-	}
-
-	rubyDecOut.Scan()
-	raw := rubyDecOut.Bytes()
 	if err := rmarsh.NewDecoder(bytes.NewReader(raw)).Decode(v); err != nil {
 		t.Fatalf("Decode() failed: %s\nRaw ruby encoded:\n%s", err, hex.Dump(raw))
 	}

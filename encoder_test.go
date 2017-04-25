@@ -1,59 +1,21 @@
-package rmarsh
+package rmarsh_test
 
 import (
-	"bufio"
 	"encoding/hex"
-	"io"
 	"math/big"
-	"os"
-	"os/exec"
 	"testing"
-)
 
-var (
-	rubyEnc    *exec.Cmd
-	rubyEncOut *bufio.Scanner
-	rubyEncIn  io.Writer
+	"github.com/samcday/rmarsh"
 )
 
 func testRubyDecode(t *testing.T, val interface{}, expected string) {
-	if rubyEnc == nil {
-		rubyEnc = exec.Command("ruby", "encoder_test.rb")
-		// Send stderr to top level so it's obvious if the Ruby script blew up somehow.
-		rubyEnc.Stderr = os.Stdout
-
-		stdout, err := rubyEnc.StdoutPipe()
-		if err != nil {
-			panic(err)
-		}
-		stdin, err := rubyEnc.StdinPipe()
-		if err != nil {
-			panic(err)
-		}
-		if err := rubyEnc.Start(); err != nil {
-			panic(err)
-		}
-
-		rubyEncIn = stdin
-		rubyEncOut = bufio.NewScanner(stdout)
-	}
-
-	b, err := Encode(val)
+	b, err := rmarsh.Encode(val)
 	if err != nil {
 		t.Fatalf("Encode() failed: %s", err)
 	}
 
-	if _, err := rubyEncIn.Write(b); err != nil {
-		panic(err)
-	}
-	if _, err := io.WriteString(rubyEncIn, "$$END$$"); err != nil {
-		panic(err)
-	}
+	result := rbDecode(t, b)
 
-	if !rubyEncOut.Scan() {
-		t.Fatalf("Error scanning output")
-	}
-	result := rubyEncOut.Text()
 	if result != expected {
 		t.Errorf("Encoded %v (%T), Ruby saw %s, expected %q\nRaw encoded:\n%s\n", val, val, result, expected, hex.Dump(b))
 	}
@@ -74,21 +36,21 @@ func TestEncodeBools(t *testing.T) {
 
 func TestEncodeSymbols(t *testing.T) {
 	// Basic symbol test
-	testRubyDecode(t, Symbol("test"), ":test")
+	testRubyDecode(t, rmarsh.Symbol("test"), ":test")
 
 	// Basic symlink test
-	testRubyDecode(t, []Symbol{Symbol("test"), Symbol("test")}, "[:test, :test]")
+	testRubyDecode(t, []rmarsh.Symbol{rmarsh.Symbol("test"), rmarsh.Symbol("test")}, "[:test, :test]")
 
 	// Slightly more contrived symlink test
-	testRubyDecode(t, []Symbol{
-		Symbol("foo"),
-		Symbol("bar"),
-		Symbol("bar"),
-		Symbol("foo"),
+	testRubyDecode(t, []rmarsh.Symbol{
+		rmarsh.Symbol("foo"),
+		rmarsh.Symbol("bar"),
+		rmarsh.Symbol("bar"),
+		rmarsh.Symbol("foo"),
 	}, "[:foo, :bar, :bar, :foo]")
 
 	// Ptr test
-	sym := Symbol("foo")
+	sym := rmarsh.Symbol("foo")
 	testRubyDecode(t, &sym, ":foo")
 }
 
@@ -148,25 +110,25 @@ func TestEncodeStrings(t *testing.T) {
 }
 
 func TestEncodeClass(t *testing.T) {
-	testRubyDecode(t, Class("Gem::Version"), "Gem::Version")
+	testRubyDecode(t, rmarsh.Class("Gem::Version"), "Gem::Version")
 
 	// Ptrs
-	v := Class("Gem::Version")
+	v := rmarsh.Class("Gem::Version")
 	testRubyDecode(t, &v, "Gem::Version")
 }
 
 func TestEncodeModule(t *testing.T) {
-	testRubyDecode(t, Module("Gem"), "Gem")
+	testRubyDecode(t, rmarsh.Module("Gem"), "Gem")
 
 	// Ptrs
-	v := Module("Gem")
+	v := rmarsh.Module("Gem")
 	testRubyDecode(t, &v, "Gem")
 }
 
 func TestEncodeSlices(t *testing.T) {
 	testRubyDecode(t, []int{}, "[]")
 	testRubyDecode(t, []int{123}, "[123]")
-	testRubyDecode(t, []interface{}{123, true, nil, Symbol("test"), "test"}, `[123, true, nil, :test, "test"]`)
+	testRubyDecode(t, []interface{}{123, true, nil, rmarsh.Symbol("test"), "test"}, `[123, true, nil, :test, "test"]`)
 
 	// Ptrs
 	v := []int{123}
@@ -182,7 +144,7 @@ func TestEncodeMap(t *testing.T) {
 }
 
 func TestEncodeInstance(t *testing.T) {
-	inst := Instance{
+	inst := rmarsh.Instance{
 		Name: "Object",
 		InstanceVars: map[string]interface{}{
 			"@test": 123,
@@ -193,7 +155,7 @@ func TestEncodeInstance(t *testing.T) {
 	// Checking object links
 	testRubyDecode(t, []interface{}{&inst, &inst}, "[#Object<:@test=123>, #Object<:@test=123>]")
 
-	testRubyDecode(t, Instance{
+	testRubyDecode(t, rmarsh.Instance{
 		Name:           "Gem::Version",
 		UserMarshalled: true,
 		Data:           []string{"1.2.3"},
@@ -201,13 +163,13 @@ func TestEncodeInstance(t *testing.T) {
 }
 
 func TestEncodeRegexp(t *testing.T) {
-	testRubyDecode(t, Regexp{
+	testRubyDecode(t, rmarsh.Regexp{
 		Expr:  "test",
-		Flags: REGEXP_MULTILINE | REGEXP_IGNORECASE,
+		Flags: rmarsh.REGEXP_MULTILINE | rmarsh.REGEXP_IGNORECASE,
 	}, `/test/mi`)
 
 	// Ptrs
-	v := Regexp{Expr: "test"}
+	v := rmarsh.Regexp{Expr: "test"}
 	testRubyDecode(t, &v, "/test/")
 }
 
