@@ -15,7 +15,7 @@ func parseFromRuby(t *testing.T, expr string) *rmarsh.Parser {
 func expectToken(t testing.TB, p *rmarsh.Parser, exp rmarsh.Token) {
 	tok, err := p.Next()
 	if err != nil {
-		t.Fatalf("Error reading token: %s", err)
+		t.Fatalf("Error reading token: %+v", err)
 	}
 	if tok != exp {
 		t.Errorf("Expected to read token %s, got %s", exp, tok)
@@ -30,6 +30,19 @@ func TestParserNil(t *testing.T) {
 	expectToken(t, p, rmarsh.TokenEOF)
 }
 
+func BenchmarkParserNil(b *testing.B) {
+	raw := rbEncode(b, "nil")
+	buf := bytes.NewReader(raw)
+	p := rmarsh.NewParser(buf)
+
+	for i := 0; i < b.N; i++ {
+		buf.Reset(raw)
+		p.Reset()
+
+		p.Next()
+	}
+}
+
 func TestParserBool(t *testing.T) {
 	p := parseFromRuby(t, "true")
 	expectToken(t, p, rmarsh.TokenTrue)
@@ -38,6 +51,19 @@ func TestParserBool(t *testing.T) {
 	p = parseFromRuby(t, "true")
 	expectToken(t, p, rmarsh.TokenTrue)
 	expectToken(t, p, rmarsh.TokenEOF)
+}
+
+func BenchmarkParserBool(b *testing.B) {
+	raw := rbEncode(b, "true")
+	buf := bytes.NewReader(raw)
+	p := rmarsh.NewParser(buf)
+
+	for i := 0; i < b.N; i++ {
+		buf.Reset(raw)
+		p.Reset()
+
+		p.Next()
+	}
 }
 
 func TestParserFixnum(t *testing.T) {
@@ -57,7 +83,7 @@ func TestParserFixnum(t *testing.T) {
 	}
 }
 
-func BenchmarkDecodeFixnum(b *testing.B) {
+func BenchmarkParserFixnum(b *testing.B) {
 	raw := rbEncode(b, "0xBEEF")
 	buf := bytes.NewReader(raw)
 	p := rmarsh.NewParser(buf)
@@ -88,7 +114,7 @@ func TestParserFloat(t *testing.T) {
 	}
 }
 
-func BenchmarkDecodeFloat(b *testing.B) {
+func BenchmarkParserFloat(b *testing.B) {
 	raw := rbEncode(b, "123.321")
 	buf := bytes.NewReader(raw)
 	p := rmarsh.NewParser(buf)
@@ -119,7 +145,7 @@ func TestParserBigNum(t *testing.T) {
 	}
 }
 
-func BenchmarkDecodeBigNum(b *testing.B) {
+func BenchmarkParserBigNum(b *testing.B) {
 	raw := rbEncode(b, "0xDEADCAFEBEEF")
 	buf := bytes.NewReader(raw)
 	p := rmarsh.NewParser(buf)
@@ -130,5 +156,30 @@ func BenchmarkDecodeBigNum(b *testing.B) {
 
 		p.Next()
 		p.BigNum()
+	}
+}
+
+func TestParserSymbol(t *testing.T) {
+	p := parseFromRuby(t, ":test")
+	expectToken(t, p, rmarsh.TokenSymbol)
+	if str, err := p.Text(); err != nil {
+		t.Errorf("p.Text() err %s", err)
+	} else if str != "test" {
+		t.Errorf("Expected p.Text() = %s, expected test", str)
+	}
+	expectToken(t, p, rmarsh.TokenEOF)
+}
+
+func BenchmarkParserSymbol(b *testing.B) {
+	raw := rbEncode(b, ":test")
+	buf := bytes.NewReader(raw)
+	p := rmarsh.NewParser(buf)
+
+	for i := 0; i < b.N; i++ {
+		buf.Reset(raw)
+		p.Reset()
+
+		p.Next()
+		p.Text()
 	}
 }

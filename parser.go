@@ -9,6 +9,11 @@ import (
 	"github.com/pkg/errors"
 )
 
+const (
+	bufSize        = 64 // Initial size of our read buffer
+	symTblGrowSize = 16 // Size to grow Symbol table by when needed
+)
+
 type Token uint8
 
 const (
@@ -19,6 +24,7 @@ const (
 	TokenFixnum
 	TokenFloat
 	TokenBigNum
+	TokenSymbol
 	TokenEOF
 )
 
@@ -44,24 +50,31 @@ type Parser struct {
 	cur Token
 	pos uint64
 
-	buf      []byte
-	ctx      []byte
+	buf []byte
+	ctx []byte
+
 	num      int64
 	flt      *float64
 	bnum     *big.Int
 	bnumsign byte
+
+	symCount int
+	symTbl   [][]byte
 }
 
 // NewParser constructs a new parser that streams data from the given io.Reader
 // Due to the nature of the Marshal format, data is read in very small increments
 // please ensure that the provided Reader is buffered, or wrap it in a bufio.Reader.
 func NewParser(r io.Reader) *Parser {
-	return &Parser{r: r, buf: make([]byte, 64)}
+	p := &Parser{r: r, buf: make([]byte, bufSize)}
+	p.Reset()
+	return p
 }
 
 func (p *Parser) Reset() {
 	p.pos = 0
 	p.cur = tokenStart
+	p.symCount = 0
 }
 
 // Next advances the parser to the next token in the stream.
@@ -104,13 +117,35 @@ func (p *Parser) BigNum() (*big.Int, error) {
 		return nil, errors.Errorf("rmarsh.Parser.BigNum() called for wrong token: %s", p.cur)
 	}
 	if p.bnum == nil {
-		reverseBytes(p.ctx)
-		p.bnum = new(big.Int).SetBytes(p.ctx)
+		b := make([]byte, len(p.ctx))
+		copy(b, p.ctx)
+		reverseBytes(b)
+		p.bnum = new(big.Int).SetBytes(b)
 		if p.bnumsign == '-' {
 			p.bnum = p.bnum.Neg(p.bnum)
 		}
 	}
 	return p.bnum, nil
+}
+
+// Bytes returns the raw bytes for the current token.
+// NOTE: The return byte slice is the one that is used internally, it will
+// be modified on the next call to Next(). If any data needs to be kept,
+// be sure to copy it out of the returned buffer.
+func (p *Parser) Bytes() []byte {
+	return p.ctx
+}
+
+// Text returns the value contained in the current token interpreted as a string.
+// Errors if the token is not one of Float, Bignum, Symbol or String
+func (p *Parser) Text() (string, error) {
+	switch p.cur {
+	case TokenBigNum:
+		return string(p.bnumsign) + string(p.ctx), nil
+	case TokenFloat, TokenSymbol:
+		return string(p.ctx), nil
+	}
+	return "", errors.Errorf("rmarsh.Parser.Text() called for wrong token: %s", p.cur)
 }
 
 func (p *Parser) adv() (err error) {
@@ -170,6 +205,32 @@ func (p *Parser) adv() (err error) {
 		if err := p.sizedBlob(true); err != nil {
 			return errors.Wrap(err, "bignum")
 		}
+	case TYPE_SYMBOL:
+		p.cur = TokenSymbol
+		if err := p.sizedBlob(false); err != nil {
+			return errors.Wrap(err, "symbol")
+		}
+		// Unfortunately, we have to take a copy of the ctx into the symbol cache here
+		// Since this symbol might be referenced by a symlink later.
+		if l := len(p.symTbl); p.symCount == l {
+			newTbl := make([][]byte, l+symTblGrowSize)
+			copy(newTbl, p.symTbl)
+			p.symTbl = newTbl
+		}
+		p.symTbl[p.symCount] = make([]byte, len(p.ctx))
+		copy(p.symTbl[p.symCount], p.ctx)
+		p.symCount++
+	case TYPE_SYMLINK:
+		p.cur = TokenSymbol
+		n, err := p.long()
+		if err != nil {
+			return errors.Wrap(err, "symlink id")
+		}
+		id := int(n)
+		if id > p.symCount {
+			return errors.Errorf("Symlink id %d is larger than max known %d", id, p.symCount)
+		}
+		p.ctx = p.symTbl[id]
 	}
 
 	return nil
