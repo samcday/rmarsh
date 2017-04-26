@@ -97,10 +97,10 @@ func (p *Parser) adv() (err error) {
 	if p.cur == tokenStart {
 		if b, err := p.readbytes(3); err != nil {
 			return errors.Wrap(err, "reading magic")
-		} else if b[0] != 0x04 && b[1] != 0x08 {
-			return errors.Errorf("Expected magic header 0x0408, got %X", binary.LittleEndian.Uint16(magic))
+		} else if b[0] != 0x04 || b[1] != 0x08 {
+			return errors.Errorf("Expected magic header 0x0408, got 0x%.4X", binary.BigEndian.Uint16(magic))
 		} else {
-			// Pointless little optimisation: we fetched 3 bytes on the first
+			// Silly little optimisation: we fetched 3 bytes on the first
 			// read since there is always at least one token to read.
 			// Saves a couple dozen nanos on them micro benchmarks. #winning #tigerblood
 			typ = b[2]
