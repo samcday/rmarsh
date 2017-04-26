@@ -183,3 +183,33 @@ func BenchmarkParserSymbol(b *testing.B) {
 		p.Text()
 	}
 }
+
+func TestParserEmptyArray(t *testing.T) {
+	p := parseFromRuby(t, "[]")
+	expectToken(t, p, rmarsh.TokenStartArray)
+	expectToken(t, p, rmarsh.TokenEndArray)
+	expectToken(t, p, rmarsh.TokenEOF)
+}
+
+func BenchmarkEmptyArray(b *testing.B) {
+	raw := rbEncode(b, "[]")
+	buf := bytes.NewReader(raw)
+	p := rmarsh.NewParser(buf)
+
+	for i := 0; i < b.N; i++ {
+		buf.Reset(raw)
+		p.Reset()
+
+		p.Next()
+		p.Next()
+	}
+}
+
+func TestParserNestedArray(t *testing.T) {
+	p := parseFromRuby(t, "[[]]")
+	expectToken(t, p, rmarsh.TokenStartArray)
+	expectToken(t, p, rmarsh.TokenStartArray)
+	expectToken(t, p, rmarsh.TokenEndArray)
+	expectToken(t, p, rmarsh.TokenEndArray)
+	expectToken(t, p, rmarsh.TokenEOF)
+}

@@ -11,7 +11,8 @@ import (
 
 const (
 	bufSize        = 64 // Initial size of our read buffer
-	symTblGrowSize = 16 // Size to grow Symbol table by when needed
+	symTblGrowSize = 8  // Amount to grow Symbol table by when needed
+	stackGrowSize  = 8  // Amount to grow stack by when needed
 )
 
 type Token uint8
@@ -25,17 +26,22 @@ const (
 	TokenFloat
 	TokenBigNum
 	TokenSymbol
+	TokenStartArray
+	TokenEndArray
 	TokenEOF
 )
 
 var tokenNames = map[Token]string{
-	TokenNil:    "TokenNil",
-	TokenTrue:   "TokenTrue",
-	TokenFalse:  "TokenFalse",
-	TokenFixnum: "TokenFixnum",
-	TokenFloat:  "TokenFloat",
-	TokenBigNum: "TokenBigNum",
-	TokenEOF:    "EOF",
+	TokenNil:        "TokenNil",
+	TokenTrue:       "TokenTrue",
+	TokenFalse:      "TokenFalse",
+	TokenFixnum:     "TokenFixnum",
+	TokenFloat:      "TokenFloat",
+	TokenBigNum:     "TokenBigNum",
+	TokenSymbol:     "TokenSymbol",
+	TokenStartArray: "TokenStartArray",
+	TokenEndArray:   "TokenEndArray",
+	TokenEOF:        "EOF",
 }
 
 func (t Token) String() string {
@@ -45,10 +51,18 @@ func (t Token) String() string {
 	return "UNKNOWN"
 }
 
+type ParserContext struct {
+	typ int
+	len int
+	pos int
+}
+
 type Parser struct {
-	r   io.Reader
-	cur Token
-	pos uint64
+	r    io.Reader
+	cur  Token
+	pos  uint64
+	st   []ParserContext
+	stSz int
 
 	buf []byte
 	ctx []byte
@@ -67,7 +81,6 @@ type Parser struct {
 // please ensure that the provided Reader is buffered, or wrap it in a bufio.Reader.
 func NewParser(r io.Reader) *Parser {
 	p := &Parser{r: r, buf: make([]byte, bufSize)}
-	p.Reset()
 	return p
 }
 
@@ -75,6 +88,7 @@ func (p *Parser) Reset() {
 	p.pos = 0
 	p.cur = tokenStart
 	p.symCount = 0
+	p.stSz = 0
 }
 
 // Next advances the parser to the next token in the stream.
@@ -151,6 +165,18 @@ func (p *Parser) Text() (string, error) {
 func (p *Parser) adv() (err error) {
 	var typ byte
 
+	if p.stSz > 0 {
+		if p.st[p.stSz-1].pos == p.st[p.stSz-1].len {
+			p.stSz--
+			p.cur = TokenEndArray
+
+			if p.stSz > 0 {
+				p.st[p.stSz-1].pos++
+			}
+
+			return nil
+		}
+	}
 	if p.cur == tokenStart {
 		if b, err := p.readbytes(3); err != nil {
 			return errors.Wrap(err, "reading magic")
@@ -227,13 +253,42 @@ func (p *Parser) adv() (err error) {
 			return errors.Wrap(err, "symlink id")
 		}
 		id := int(n)
-		if id > p.symCount {
-			return errors.Errorf("Symlink id %d is larger than max known %d", id, p.symCount)
+		if id >= p.symCount {
+			return errors.Errorf("Symlink id %d is larger than max known %d", id, p.symCount-1)
 		}
 		p.ctx = p.symTbl[id]
+	case TYPE_ARRAY:
+		p.cur = TokenStartArray
+		n, err := p.long()
+		if err != nil {
+			return errors.Wrap(err, "array")
+		}
+
+		id := p.pushStack()
+		p.st[id].typ = 1
+		p.st[id].len = int(n)
+		return nil
+	}
+
+	if p.stSz > 0 {
+		p.st[p.stSz-1].pos++
 	}
 
 	return nil
+}
+
+func (p *Parser) pushStack() (num int) {
+	num = p.stSz
+
+	// Grow stack if needed
+	if l := len(p.st); p.stSz == l {
+		newStack := make([]ParserContext, l+stackGrowSize)
+		copy(newStack, p.st)
+		p.st = newStack
+	}
+
+	p.stSz++
+	return
 }
 
 // Strings, Symbols, Floats, Bignums and the like all begin with an encoded long
