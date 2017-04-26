@@ -29,7 +29,7 @@ func scanStream(data []byte, atEOF bool) (advance int, token []byte, err error) 
 	return 0, nil, nil
 }
 
-func rbEncode(t *testing.T, payload string) []byte {
+func rbEncode(t testing.TB, payload string) []byte {
 	if rbEnc == nil {
 		rbEnc = exec.Command("ruby", "rb_encoder.rb")
 		// Send stderr to top level so it's obvious if the Ruby script blew up somehow.
@@ -64,7 +64,7 @@ func rbEncode(t *testing.T, payload string) []byte {
 	return rbEncOut.Bytes()
 }
 
-func rbDecode(t *testing.T, b []byte) string {
+func rbDecode(t testing.TB, b []byte) string {
 	if rbDec == nil {
 		rbDec = exec.Command("ruby", "rb_decoder.rb")
 		// Send stderr to top level so it's obvious if the Ruby script blew up somehow.
