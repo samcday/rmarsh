@@ -212,4 +212,13 @@ func TestParserNestedArray(t *testing.T) {
 	expectToken(t, p, rmarsh.TokenEndArray)
 	expectToken(t, p, rmarsh.TokenEndArray)
 	expectToken(t, p, rmarsh.TokenEOF)
+
+	p = parseFromRuby(t, "[[], []]")
+	expectToken(t, p, rmarsh.TokenStartArray)
+	expectToken(t, p, rmarsh.TokenStartArray)
+	expectToken(t, p, rmarsh.TokenEndArray)
+	expectToken(t, p, rmarsh.TokenStartArray)
+	expectToken(t, p, rmarsh.TokenEndArray)
+	expectToken(t, p, rmarsh.TokenEndArray)
+	expectToken(t, p, rmarsh.TokenEOF)
 }

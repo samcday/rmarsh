@@ -63,6 +63,7 @@ type Parser struct {
 	pos  uint64
 	st   []ParserContext
 	stSz int
+	cst  *ParserContext
 
 	buf []byte
 	ctx []byte
@@ -165,13 +166,13 @@ func (p *Parser) Text() (string, error) {
 func (p *Parser) adv() (err error) {
 	var typ byte
 
-	if p.stSz > 0 {
-		if p.st[p.stSz-1].pos == p.st[p.stSz-1].len {
-			p.stSz--
+	if p.cst != nil {
+		if p.cst.pos == p.cst.len {
 			p.cur = TokenEndArray
+			p.popStack()
 
-			if p.stSz > 0 {
-				p.st[p.stSz-1].pos++
+			if p.cst != nil {
+				p.cst.pos++
 			}
 
 			return nil
@@ -264,22 +265,20 @@ func (p *Parser) adv() (err error) {
 			return errors.Wrap(err, "array")
 		}
 
-		id := p.pushStack()
-		p.st[id].typ = 1
-		p.st[id].len = int(n)
+		p.pushStack()
+		p.cst.typ = 1
+		p.cst.len = int(n)
 		return nil
 	}
 
-	if p.stSz > 0 {
-		p.st[p.stSz-1].pos++
+	if p.cst != nil {
+		p.cst.pos++
 	}
 
 	return nil
 }
 
-func (p *Parser) pushStack() (num int) {
-	num = p.stSz
-
+func (p *Parser) pushStack() {
 	// Grow stack if needed
 	if l := len(p.st); p.stSz == l {
 		newStack := make([]ParserContext, l+stackGrowSize)
@@ -287,8 +286,17 @@ func (p *Parser) pushStack() (num int) {
 		p.st = newStack
 	}
 
+	p.cst = &p.st[p.stSz]
 	p.stSz++
-	return
+}
+
+func (p *Parser) popStack() {
+	p.stSz--
+	if p.stSz > 0 {
+		p.cst = &p.st[p.stSz-1]
+	} else {
+		p.cst = nil
+	}
 }
 
 // Strings, Symbols, Floats, Bignums and the like all begin with an encoded long
