@@ -3,21 +3,11 @@ package rmarsh
 import (
 	"encoding/binary"
 	"io"
+	"math/big"
 	"strconv"
 
 	"github.com/pkg/errors"
 )
-
-type Parser struct {
-	r   io.Reader
-	cur Token
-	pos uint64
-
-	buf []byte
-	ctx []byte
-	num int64
-	flt *float64
-}
 
 type Token uint8
 
@@ -28,6 +18,7 @@ const (
 	TokenFalse
 	TokenFixnum
 	TokenFloat
+	TokenBigNum
 	TokenEOF
 )
 
@@ -37,6 +28,8 @@ var tokenNames = map[Token]string{
 	TokenFalse:  "TokenFalse",
 	TokenFixnum: "TokenFixnum",
 	TokenFloat:  "TokenFloat",
+	TokenBigNum: "TokenBigNum",
+	TokenEOF:    "EOF",
 }
 
 func (t Token) String() string {
@@ -44,6 +37,19 @@ func (t Token) String() string {
 		return n
 	}
 	return "UNKNOWN"
+}
+
+type Parser struct {
+	r   io.Reader
+	cur Token
+	pos uint64
+
+	buf      []byte
+	ctx      []byte
+	num      int64
+	flt      *float64
+	bnum     *big.Int
+	bnumsign byte
 }
 
 // NewParser constructs a new parser that streams data from the given io.Reader
@@ -75,7 +81,7 @@ func (p *Parser) Int() (int64, error) {
 	return p.num, nil
 }
 
-// Float returns the value contained in the current Float token
+// Float returns the value contained in the current Float token.
 // Returns an error if called for any other type of token.
 func (p *Parser) Float() (float64, error) {
 	if p.cur != TokenFloat {
@@ -89,6 +95,22 @@ func (p *Parser) Float() (float64, error) {
 		}
 	}
 	return *p.flt, nil
+}
+
+// BigNum returns the value contained in the current BigNum token.
+// Returns an error if called for any other type of token.
+func (p *Parser) BigNum() (*big.Int, error) {
+	if p.cur != TokenBigNum {
+		return nil, errors.Errorf("rmarsh.Parser.BigNum() called for wrong token: %s", p.cur)
+	}
+	if p.bnum == nil {
+		reverseBytes(p.ctx)
+		p.bnum = new(big.Int).SetBytes(p.ctx)
+		if p.bnumsign == '-' {
+			p.bnum = p.bnum.Neg(p.bnum)
+		}
+	}
+	return p.bnum, nil
 }
 
 func (p *Parser) adv() (err error) {
@@ -130,20 +152,46 @@ func (p *Parser) adv() (err error) {
 		}
 	case TYPE_FLOAT:
 		p.cur = TokenFloat
-		n, err := p.long()
-		if err != nil {
+		// Float() caches the result of strconv.ParseFloat, since it's pretty expensive.
+		// We clear out any previously cached value if we've parsed a float earlier in
+		// the stream.
+		p.flt = nil
+		if err := p.sizedBlob(false); err != nil {
 			return errors.Wrap(err, "float")
 		}
-		// strconv is expensive! We don't actually do the work to interpret the bytes
-		// as a string unless the caller actually wants it. And when we do that, we cached
-		// the result in p.flt in case multiple calls to Float() are made.
-		p.flt = nil
-		if p.ctx, err = p.readbytes(uint64(n)); err != nil {
-			return err
+	case TYPE_BIGNUM:
+		p.cur = TokenBigNum
+		p.bnum = nil
+		p.bnumsign, err = p.readbyte()
+		if err != nil {
+			return errors.Wrap(err, "bignum")
+		}
+
+		if err := p.sizedBlob(true); err != nil {
+			return errors.Wrap(err, "bignum")
 		}
 	}
 
 	return nil
+}
+
+// Strings, Symbols, Floats, Bignums and the like all begin with an encoded long
+// for the size and then the raw bytes. In most cases, interpreting those bytes
+// is relatively expensive - and the caller may not even care (just skips to the
+// next token). So, we save off the raw bytes and interpret them only when needed.
+func (p *Parser) sizedBlob(bnum bool) error {
+	sz, err := p.long()
+	if err != nil {
+		return err
+	}
+
+	// For some stupid reason bignums store the length in shorts, not bytes.
+	if bnum {
+		sz = sz * 2
+	}
+
+	p.ctx, err = p.readbytes(uint64(sz))
+	return err
 }
 
 func (p *Parser) long() (int64, error) {

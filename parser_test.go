@@ -101,3 +101,34 @@ func BenchmarkDecodeFloat(b *testing.B) {
 		p.Float()
 	}
 }
+
+func TestParserBigNum(t *testing.T) {
+	p := parseFromRuby(t, "-0xDEADCAFEBEEF")
+	expectToken(t, p, rmarsh.TokenBigNum)
+	if n, err := p.BigNum(); err != nil {
+		t.Errorf("p.BigNum() err %s", err)
+	} else if str := n.Text(16); str != "-deadcafebeef" {
+		t.Errorf("Expected p.BigNum() = %s, expected -deadcafebeef", str)
+	}
+	expectToken(t, p, rmarsh.TokenEOF)
+
+	p = parseFromRuby(t, "true")
+	p.Next()
+	if _, err := p.Float(); err == nil || err.Error() != "rmarsh.Parser.Float() called for wrong token: TokenTrue" {
+		t.Errorf("p.Float() unexpected err %s", err)
+	}
+}
+
+func BenchmarkDecodeBigNum(b *testing.B) {
+	raw := rbEncode(b, "0xDEADCAFEBEEF")
+	buf := bytes.NewReader(raw)
+	p := rmarsh.NewParser(buf)
+
+	for i := 0; i < b.N; i++ {
+		buf.Reset(raw)
+		p.Reset()
+
+		p.Next()
+		p.BigNum()
+	}
+}
