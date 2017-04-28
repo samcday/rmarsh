@@ -26,8 +26,11 @@ const (
 	TokenFloat
 	TokenBigNum
 	TokenSymbol
+	TokenString
 	TokenStartArray
 	TokenEndArray
+	TokenStartIVar
+	TokenEndIVar
 	TokenEOF
 )
 
@@ -39,8 +42,11 @@ var tokenNames = map[Token]string{
 	TokenFloat:      "TokenFloat",
 	TokenBigNum:     "TokenBigNum",
 	TokenSymbol:     "TokenSymbol",
+	TokenString:     "TokenString",
 	TokenStartArray: "TokenStartArray",
 	TokenEndArray:   "TokenEndArray",
+	TokenStartIVar:  "TokenStartIVar",
+	TokenEndIVar:    "TokenEndIVar",
 	TokenEOF:        "EOF",
 }
 
@@ -51,10 +57,17 @@ func (t Token) String() string {
 	return "UNKNOWN"
 }
 
+const (
+	ctxArray = iota
+	ctxIVar
+)
+
 type ParserContext struct {
-	typ int
-	len int
+	typ uint8
+	sz  int
 	pos int
+
+	ivSym *string // If current context is an IVar, then this will contain the instance variable name
 }
 
 type Parser struct {
@@ -94,9 +107,48 @@ func (p *Parser) Reset() {
 
 // Next advances the parser to the next token in the stream.
 func (p *Parser) Next() (Token, error) {
+	// If we're currently parsing an IVar, then we handle the next symbol+value pair.
+	if p.cst != nil && p.cst.typ == ctxIVar {
+		if p.cst.sz > 0 {
+			return p.advIVar()
+		} else if p.cst.sz < 0 {
+			// Crappy state handling being encoded in magic numbers.
+			// This situation means we only just parsed the beginning of the IVar
+			// in the previous Next() call. So we need to let the actual value read
+			// start. We mark the sz as 0 so that once we're back to this context
+			// (after current value is parsed) we'll then read the instance variable
+			// length and read all the instance vars.
+			p.cst.sz = 0
+		} else {
+			// If we get here, it's because we finished parsing the actual value for an IVar
+			// and now it's time to parse the instance variables.
+			n, err := p.long()
+			if err != nil {
+				return tokenStart, errors.Wrap(err, "ivar")
+			}
+			p.cst.pos = 0
+			p.cst.sz = int(n)
+			return p.advIVar()
+		}
+	} else if p.cst != nil && p.cst.pos == p.cst.sz {
+		// If we're in the middle of an array/map, check if we've finished it.
+		switch p.cst.typ {
+		case ctxArray:
+			p.cur = TokenEndArray
+		}
+
+		p.popStack()
+		return p.cur, nil
+	}
+
 	if err := p.adv(); err != nil {
 		return 0, errors.Wrap(err, "rmarsh.Parser.Next()")
 	}
+
+	if p.cst != nil {
+		p.cst.pos++
+	}
+
 	return p.cur, nil
 }
 
@@ -151,13 +203,23 @@ func (p *Parser) Bytes() []byte {
 	return p.ctx
 }
 
+// IVarName returns the name of the instance variable that is currently being parsed.
+// Errors if not presently parsing the variables of an IVar.
+func (p *Parser) IVarName() (string, error) {
+	if p.cst == nil || p.cst.typ != ctxIVar {
+		return "", errors.New("rmarsh.Parser.IVarName() called outside of an IVar")
+	}
+
+	return *p.cst.ivSym, nil
+}
+
 // Text returns the value contained in the current token interpreted as a string.
 // Errors if the token is not one of Float, Bignum, Symbol or String
 func (p *Parser) Text() (string, error) {
 	switch p.cur {
 	case TokenBigNum:
 		return string(p.bnumsign) + string(p.ctx), nil
-	case TokenFloat, TokenSymbol:
+	case TokenFloat, TokenSymbol, TokenString:
 		return string(p.ctx), nil
 	}
 	return "", errors.Errorf("rmarsh.Parser.Text() called for wrong token: %s", p.cur)
@@ -166,18 +228,6 @@ func (p *Parser) Text() (string, error) {
 func (p *Parser) adv() (err error) {
 	var typ byte
 
-	if p.cst != nil {
-		if p.cst.pos == p.cst.len {
-			p.cur = TokenEndArray
-			p.popStack()
-
-			if p.cst != nil {
-				p.cst.pos++
-			}
-
-			return nil
-		}
-	}
 	if p.cur == tokenStart {
 		if b, err := p.readbytes(3); err != nil {
 			return errors.Wrap(err, "reading magic")
@@ -247,6 +297,11 @@ func (p *Parser) adv() (err error) {
 		p.symTbl[p.symCount] = make([]byte, len(p.ctx))
 		copy(p.symTbl[p.symCount], p.ctx)
 		p.symCount++
+	case TYPE_STRING:
+		p.cur = TokenString
+		if err := p.sizedBlob(false); err != nil {
+			return errors.Wrap(err, "string")
+		}
 	case TYPE_SYMLINK:
 		p.cur = TokenSymbol
 		n, err := p.long()
@@ -265,20 +320,37 @@ func (p *Parser) adv() (err error) {
 			return errors.Wrap(err, "array")
 		}
 
-		p.pushStack()
-		p.cst.typ = 1
-		p.cst.len = int(n)
-		return nil
-	}
-
-	if p.cst != nil {
-		p.cst.pos++
+		p.pushStack(ctxArray, int(n))
+	case TYPE_IVAR:
+		p.cur = TokenStartIVar
+		p.pushStack(ctxIVar, -1)
 	}
 
 	return nil
 }
 
-func (p *Parser) pushStack() {
+func (p *Parser) advIVar() (Token, error) {
+	if p.cst.pos == p.cst.sz {
+		p.cur = TokenEndIVar
+		p.popStack()
+		return p.cur, nil
+	}
+	p.cst.pos++
+
+	// Next thing needs to be a symbol, or things are really FUBAR.
+	if err := p.adv(); err != nil {
+		return p.cur, err
+	} else if p.cur != TokenSymbol {
+		return tokenStart, errors.Errorf("Unexpected token type %s while parsing IVar, expected Symbol", p.cur)
+	}
+	sym := string(p.ctx)
+	p.cst.ivSym = &sym
+
+	err := p.adv()
+	return p.cur, err
+}
+
+func (p *Parser) pushStack(typ uint8, sz int) {
 	// Grow stack if needed
 	if l := len(p.st); p.stSz == l {
 		newStack := make([]ParserContext, l+stackGrowSize)
@@ -287,6 +359,10 @@ func (p *Parser) pushStack() {
 	}
 
 	p.cst = &p.st[p.stSz]
+	p.cst.typ = typ
+	p.cst.sz = sz
+	p.cst.pos = -1
+
 	p.stSz++
 }
 
@@ -294,6 +370,7 @@ func (p *Parser) popStack() {
 	p.stSz--
 	if p.stSz > 0 {
 		p.cst = &p.st[p.stSz-1]
+		p.cst.pos++
 	} else {
 		p.cst = nil
 	}

@@ -2,23 +2,27 @@ package rmarsh_test
 
 import (
 	"bytes"
+	"encoding/hex"
 	"testing"
 
 	"github.com/samcday/rmarsh"
 )
 
+var curRaw []byte
+
 func parseFromRuby(t *testing.T, expr string) *rmarsh.Parser {
 	b := rbEncode(t, expr)
+	curRaw = b
 	return rmarsh.NewParser(bytes.NewReader(b))
 }
 
 func expectToken(t testing.TB, p *rmarsh.Parser, exp rmarsh.Token) {
 	tok, err := p.Next()
 	if err != nil {
-		t.Fatalf("Error reading token: %+v", err)
+		t.Fatalf("Error reading token: %+v\nRaw:\n%s\n", err, hex.Dump(curRaw))
 	}
 	if tok != exp {
-		t.Errorf("Expected to read token %s, got %s", exp, tok)
+		t.Errorf("Expected to read token %s, got %s\nRaw:\n%s\n", exp, tok, hex.Dump(curRaw))
 	}
 }
 
@@ -72,7 +76,7 @@ func TestParserFixnum(t *testing.T) {
 	if n, err := p.Int(); err != nil {
 		t.Errorf("p.Int() err %s", err)
 	} else if n != 123 {
-		t.Errorf("Expected p.Int() = %d, expected 123", n)
+		t.Errorf("p.Int() = %d, expected 123", n)
 	}
 	expectToken(t, p, rmarsh.TokenEOF)
 
@@ -103,7 +107,7 @@ func TestParserFloat(t *testing.T) {
 	if n, err := p.Float(); err != nil {
 		t.Errorf("p.Float() err %s", err)
 	} else if n != 123.321 {
-		t.Errorf("Expected p.Float() = %f, expected 123.321", n)
+		t.Errorf("p.Float() = %f, expected 123.321", n)
 	}
 	expectToken(t, p, rmarsh.TokenEOF)
 
@@ -134,7 +138,7 @@ func TestParserBigNum(t *testing.T) {
 	if n, err := p.BigNum(); err != nil {
 		t.Errorf("p.BigNum() err %s", err)
 	} else if str := n.Text(16); str != "-deadcafebeef" {
-		t.Errorf("Expected p.BigNum() = %s, expected -deadcafebeef", str)
+		t.Errorf("p.BigNum() = %s, expected -deadcafebeef", str)
 	}
 	expectToken(t, p, rmarsh.TokenEOF)
 
@@ -165,13 +169,39 @@ func TestParserSymbol(t *testing.T) {
 	if str, err := p.Text(); err != nil {
 		t.Errorf("p.Text() err %s", err)
 	} else if str != "test" {
-		t.Errorf("Expected p.Text() = %s, expected test", str)
+		t.Errorf("p.Text() = %s, expected test", str)
 	}
 	expectToken(t, p, rmarsh.TokenEOF)
 }
 
 func BenchmarkParserSymbol(b *testing.B) {
 	raw := rbEncode(b, ":test")
+	buf := bytes.NewReader(raw)
+	p := rmarsh.NewParser(buf)
+
+	for i := 0; i < b.N; i++ {
+		buf.Reset(raw)
+		p.Reset()
+
+		p.Next()
+		p.Text()
+	}
+}
+
+func TestParserString(t *testing.T) {
+	// We generate this string in a convoluted way so it has no encoding (and thus no IVar)
+	p := parseFromRuby(t, "[116,101,115,116].pack('c*')")
+	expectToken(t, p, rmarsh.TokenString)
+	if str, err := p.Text(); err != nil {
+		t.Errorf("p.Text() err %s", err)
+	} else if str != "test" {
+		t.Errorf("p.Text() = %s, expected test", str)
+	}
+	expectToken(t, p, rmarsh.TokenEOF)
+}
+
+func BenchmarkParserString(b *testing.B) {
+	raw := rbEncode(b, "[116,101,115,116].pack('c*')")
 	buf := bytes.NewReader(raw)
 	p := rmarsh.NewParser(buf)
 
@@ -220,5 +250,25 @@ func TestParserNestedArray(t *testing.T) {
 	expectToken(t, p, rmarsh.TokenStartArray)
 	expectToken(t, p, rmarsh.TokenEndArray)
 	expectToken(t, p, rmarsh.TokenEndArray)
+	expectToken(t, p, rmarsh.TokenEOF)
+}
+
+func TestParserIVar(t *testing.T) {
+	p := parseFromRuby(t, `[].tap{|v|v.instance_variable_set(:@test, 123)}`)
+	expectToken(t, p, rmarsh.TokenStartIVar)
+	expectToken(t, p, rmarsh.TokenStartArray)
+	expectToken(t, p, rmarsh.TokenEndArray)
+
+	// Next token should be the :@test value, a fixnum
+	expectToken(t, p, rmarsh.TokenFixnum)
+	// And the current instance variable should be @test
+	if str, err := p.IVarName(); err != nil {
+		t.Fatal(err)
+	} else if str != "@test" {
+		t.Errorf("p.IVarName() = %s, expected @test", str)
+	}
+
+	expectToken(t, p, rmarsh.TokenEndIVar)
+
 	expectToken(t, p, rmarsh.TokenEOF)
 }
