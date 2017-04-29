@@ -22,7 +22,7 @@ func expectToken(t testing.TB, p *rmarsh.Parser, exp rmarsh.Token) {
 		t.Fatalf("Error reading token: %+v\nRaw:\n%s\n", err, hex.Dump(curRaw))
 	}
 	if tok != exp {
-		t.Errorf("Expected to read token %s, got %s\nRaw:\n%s\n", exp, tok, hex.Dump(curRaw))
+		t.Fatalf("Expected to read token %s, got %s\nRaw:\n%s\n", exp, tok, hex.Dump(curRaw))
 	}
 }
 
@@ -250,6 +250,28 @@ func TestParserNestedArray(t *testing.T) {
 	expectToken(t, p, rmarsh.TokenStartArray)
 	expectToken(t, p, rmarsh.TokenEndArray)
 	expectToken(t, p, rmarsh.TokenEndArray)
+	expectToken(t, p, rmarsh.TokenEOF)
+}
+
+func TestParserHash(t *testing.T) {
+	p := parseFromRuby(t, "{}")
+	expectToken(t, p, rmarsh.TokenStartHash)
+	expectToken(t, p, rmarsh.TokenEndHash)
+	expectToken(t, p, rmarsh.TokenEOF)
+
+	p = parseFromRuby(t, "{:foo => 123}")
+	expectToken(t, p, rmarsh.TokenStartHash)
+	expectToken(t, p, rmarsh.TokenSymbol)
+	expectToken(t, p, rmarsh.TokenFixnum)
+	expectToken(t, p, rmarsh.TokenEndHash)
+	expectToken(t, p, rmarsh.TokenEOF)
+
+	p = parseFromRuby(t, "{{} => 123}")
+	expectToken(t, p, rmarsh.TokenStartHash)
+	expectToken(t, p, rmarsh.TokenStartHash)
+	expectToken(t, p, rmarsh.TokenEndHash)
+	expectToken(t, p, rmarsh.TokenFixnum)
+	expectToken(t, p, rmarsh.TokenEndHash)
 	expectToken(t, p, rmarsh.TokenEOF)
 }
 

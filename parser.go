@@ -29,6 +29,8 @@ const (
 	TokenString
 	TokenStartArray
 	TokenEndArray
+	TokenStartHash
+	TokenEndHash
 	TokenStartIVar
 	TokenEndIVar
 	TokenEOF
@@ -45,6 +47,8 @@ var tokenNames = map[Token]string{
 	TokenString:     "TokenString",
 	TokenStartArray: "TokenStartArray",
 	TokenEndArray:   "TokenEndArray",
+	TokenStartHash:  "TokenStartHash",
+	TokenEndHash:    "TokenEndHash",
 	TokenStartIVar:  "TokenStartIVar",
 	TokenEndIVar:    "TokenEndIVar",
 	TokenEOF:        "EOF",
@@ -59,6 +63,7 @@ func (t Token) String() string {
 
 const (
 	ctxArray = iota
+	ctxHash
 	ctxIVar
 )
 
@@ -135,6 +140,8 @@ func (p *Parser) Next() (Token, error) {
 		switch p.cst.typ {
 		case ctxArray:
 			p.cur = TokenEndArray
+		case ctxHash:
+			p.cur = TokenEndHash
 		}
 
 		p.popStack()
@@ -319,8 +326,14 @@ func (p *Parser) adv() (err error) {
 		if err != nil {
 			return errors.Wrap(err, "array")
 		}
-
 		p.pushStack(ctxArray, int(n))
+	case TYPE_HASH:
+		p.cur = TokenStartHash
+		n, err := p.long()
+		if err != nil {
+			return errors.Wrap(err, "hash")
+		}
+		p.pushStack(ctxHash, int(n*2))
 	case TYPE_IVAR:
 		p.cur = TokenStartIVar
 		p.pushStack(ctxIVar, -1)
