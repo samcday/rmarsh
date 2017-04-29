@@ -275,7 +275,7 @@ func TestParserHash(t *testing.T) {
 	expectToken(t, p, rmarsh.TokenEOF)
 }
 
-func TestParserIVar(t *testing.T) {
+func TestParserIVarArray(t *testing.T) {
 	p := parseFromRuby(t, `[].tap{|v|v.instance_variable_set(:@test, 123)}`)
 	expectToken(t, p, rmarsh.TokenStartIVar)
 	expectToken(t, p, rmarsh.TokenStartArray)
@@ -291,6 +291,29 @@ func TestParserIVar(t *testing.T) {
 	}
 
 	expectToken(t, p, rmarsh.TokenEndIVar)
+	expectToken(t, p, rmarsh.TokenEOF)
+}
 
+func TestParserIVarHash(t *testing.T) {
+	p := parseFromRuby(t, `{}.tap{|v|v.instance_variable_set(:@test, 123)}`)
+	expectToken(t, p, rmarsh.TokenStartIVar)
+	expectToken(t, p, rmarsh.TokenStartHash)
+	expectToken(t, p, rmarsh.TokenEndHash)
+	expectToken(t, p, rmarsh.TokenFixnum)
+	expectToken(t, p, rmarsh.TokenEndIVar)
+	expectToken(t, p, rmarsh.TokenEOF)
+}
+
+func TestParserIVarString(t *testing.T) {
+	p := parseFromRuby(t, `"test"`)
+	expectToken(t, p, rmarsh.TokenStartIVar)
+	expectToken(t, p, rmarsh.TokenString)
+	expectToken(t, p, rmarsh.TokenTrue)
+	if str, err := p.IVarName(); err != nil {
+		t.Fatal(err)
+	} else if str != "E" {
+		t.Errorf("p.IVarName() = %s, expected E", str)
+	}
+	expectToken(t, p, rmarsh.TokenEndIVar)
 	expectToken(t, p, rmarsh.TokenEOF)
 }
