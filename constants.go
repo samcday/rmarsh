@@ -43,3 +43,12 @@ var (
 	ifaceType  = reflect.TypeOf(new(interface{})).Elem()
 	stringType = reflect.TypeOf("")
 )
+
+const (
+	// The highest+lowest values that can be encoded in a fixnum
+	fixnumMin = -0x40000000
+	fixnumMax = +0x3FFFFFFF
+
+	// Max number of a bytes a fixnum can occupy
+	fixnumMaxBytes = 5
+)

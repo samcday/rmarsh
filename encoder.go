@@ -12,11 +12,6 @@ import (
 	"github.com/pkg/errors"
 )
 
-const (
-	encodeNumMin = -0x3FFFFFFF
-	encodeNumMax = +0x3FFFFFFF
-)
-
 // Encoder takes arbitrary Golang objects and writes them to a io.Writer in Ruby Marshal format.
 type Encoder struct {
 	w   io.Writer
@@ -149,7 +144,7 @@ func (enc *Encoder) bool(val bool) error {
 
 func (enc *Encoder) fixnum(v reflect.Value) error {
 	ival := v.Int()
-	if ival < encodeNumMin || ival > encodeNumMax {
+	if ival < fixnumMin || ival > fixnumMax {
 		return enc.bignum(big.NewInt(ival))
 	}
 
@@ -177,7 +172,7 @@ func (enc *Encoder) bignum(num *big.Int) error {
 
 	b := num.Bytes()
 	sz := int64(math.Ceil(float64(len(b)) / 2))
-	if sz > encodeNumMax {
+	if sz > fixnumMax {
 		return fmt.Errorf("Received a number so large that I can't even fit it into a Ruby bignum. Congrats, I think you just unlocked some kind of achievement.")
 	}
 	reverseBytes(b)
@@ -493,7 +488,7 @@ func encodeNumPos(num uint64) []byte {
 		return []byte{3, byte(num & 0xFF), byte(num >> 8 & 0xFF), byte(num >> 16 & 0xFF)}
 	}
 
-	if num <= encodeNumMax {
+	if num <= fixnumMax {
 		return []byte{4, byte(num & 0xFF), byte(num >> 8 & 0xFF), byte(num >> 16 & 0xFF), byte(num >> 24 & 0xFF)}
 	}
 
@@ -517,7 +512,7 @@ func encodeNumNeg(num int64) []byte {
 		return []byte{negbyte(-3), byte(num & 0xFF), byte(num >> 8 & 0xFF), byte(num >> 16 & 0xFF)}
 	}
 
-	if num >= encodeNumMin {
+	if num >= fixnumMin {
 		return []byte{negbyte(-4), byte(num & 0xFF), byte(num >> 8 & 0xFF), byte(num >> 16 & 0xFF), byte(num >> 24 & 0xFF)}
 	}
 

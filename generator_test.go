@@ -27,6 +27,20 @@ func TestGenNil(t *testing.T) {
 	})
 }
 
+func BenchmarkGenNil(b *testing.B) {
+	buf := new(bytes.Buffer)
+	gen := rmarsh.NewGenerator(buf)
+
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		gen.Reset()
+
+		if err := gen.Nil(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func TestGenOverflow(t *testing.T) {
 	b := new(bytes.Buffer)
 	gen := rmarsh.NewGenerator(b)
@@ -45,4 +59,41 @@ func TestGenBool(t *testing.T) {
 	testGenerator(t, "false", func(gen *rmarsh.Generator) error {
 		return gen.Bool(false)
 	})
+}
+
+func BenchmarkGenBool(b *testing.B) {
+	buf := new(bytes.Buffer)
+	gen := rmarsh.NewGenerator(buf)
+
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		gen.Reset()
+
+		if err := gen.Bool(true); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func TestGenFixnums(t *testing.T) {
+	testGenerator(t, "123", func(gen *rmarsh.Generator) error {
+		return gen.Fixnum(123)
+	})
+	testGenerator(t, "666", func(gen *rmarsh.Generator) error {
+		return gen.Fixnum(666)
+	})
+}
+
+func BenchmarkGenFixnum(b *testing.B) {
+	buf := new(bytes.Buffer)
+	gen := rmarsh.NewGenerator(buf)
+
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		gen.Reset()
+
+		if err := gen.Fixnum(123); err != nil {
+			b.Fatal(err)
+		}
+	}
 }
