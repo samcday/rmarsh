@@ -130,3 +130,23 @@ func BenchmarkGenBignum(b *testing.B) {
 		}
 	}
 }
+
+func TestGenSymbol(t *testing.T) {
+	testGenerator(t, ":test", func(gen *rmarsh.Generator) error {
+		return gen.Symbol("test")
+	})
+}
+
+func BenchmarkGenSymbol(b *testing.B) {
+	buf := new(bytes.Buffer)
+	gen := rmarsh.NewGenerator(buf)
+
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		gen.Reset()
+
+		if err := gen.Symbol("test"); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
