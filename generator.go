@@ -9,16 +9,14 @@ import (
 
 var ErrGeneratorFinished = fmt.Errorf("Attempting to write value to a finished Marshal stream")
 
-type genState struct {
-	cnt int
-	pos int
-}
+const (
+	genStateGrowSize = 8 // Initial size + amount to grow state stack by
+)
 
 type Generator struct {
-	w    io.Writer
-	c    int
-	st   []genState
-	stSz int
+	w  io.Writer
+	c  int
+	st genState
 
 	buf  []byte
 	bufn int
@@ -29,20 +27,17 @@ type Generator struct {
 
 func NewGenerator(w io.Writer) *Generator {
 	gen := &Generator{
-		w:    w,
-		stSz: 1,
-		st:   make([]genState, 8),
-		buf:  make([]byte, 128),
+		w:   w,
+		buf: make([]byte, 128),
 	}
-	gen.st[0].cnt = 1
+	gen.st.stack = make([]genStateItem, genStateGrowSize)
+	gen.st.reset()
 	return gen
 }
 
 func (gen *Generator) Reset() {
 	gen.c = 0
-	gen.stSz = 1
-	gen.st[0].cnt = 1
-	gen.st[0].pos = 0
+	gen.st.reset()
 	gen.symCount = 0
 }
 
@@ -192,14 +187,13 @@ func (gen *Generator) Symbol(sym string) error {
 }
 
 func (gen *Generator) checkState() error {
-	if gen.stSz == 0 {
+	if gen.st.sz == 0 {
 		return ErrGeneratorFinished
 	}
 
 	// If we're in top level ctx and haven't written anything yet, then we
 	// gotta write the magic.
-	cst := gen.st[gen.stSz-1]
-	if cst.pos == 0 && gen.stSz == 1 {
+	if gen.st.cur.pos == 0 && gen.st.sz == 1 {
 		gen.buf[0] = 0x04
 		gen.buf[1] = 0x08
 		gen.bufn += 2
@@ -217,12 +211,7 @@ func (gen *Generator) writeAdv() error {
 		gen.bufn = 0
 	}
 
-	cst := gen.st[gen.stSz-1]
-	cst.pos++
-	// If we've finished with the current ctx, we pop it
-	if cst.pos == cst.cnt {
-		gen.stSz--
-	}
+	gen.st.adv()
 	return nil
 }
 
@@ -267,4 +256,43 @@ func (gen *Generator) write(b []byte) error {
 	}
 	gen.c += l
 	return nil
+}
+
+const (
+	genStTop = iota
+	genStArr
+)
+
+type genStateItem struct {
+	cnt int
+	pos int
+	typ uint8
+}
+
+func (st *genStateItem) reset(sz int, typ uint8) {
+	st.cnt = sz
+	st.pos = 0
+	st.typ = typ
+}
+
+type genState struct {
+	stack []genStateItem
+	sz    int
+	cur   *genStateItem
+}
+
+// Resets generator state back to initial state (which is ready for a new
+// top level value to be written)
+func (st *genState) reset() {
+	st.sz = 1
+	st.cur = &st.stack[0]
+	st.stack[0].reset(1, genStTop)
+}
+
+func (st *genState) adv() {
+	st.cur.pos++
+	// If we've finished with the current ctx, we pop it
+	if st.cur.pos == st.cur.cnt {
+		st.sz--
+	}
 }
