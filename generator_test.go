@@ -3,6 +3,8 @@ package rmarsh_test
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
+	"math/big"
 	"testing"
 
 	"github.com/samcday/rmarsh"
@@ -82,6 +84,9 @@ func TestGenFixnums(t *testing.T) {
 	testGenerator(t, "666", func(gen *rmarsh.Generator) error {
 		return gen.Fixnum(666)
 	})
+	testGenerator(t, fmt.Sprintf("%d", 0xDEADCAFEBEEF), func(gen *rmarsh.Generator) error {
+		return gen.Fixnum(0xDEADCAFEBEEF)
+	})
 }
 
 func BenchmarkGenFixnum(b *testing.B) {
@@ -93,6 +98,34 @@ func BenchmarkGenFixnum(b *testing.B) {
 		gen.Reset()
 
 		if err := gen.Fixnum(123); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func TestGenBignum(t *testing.T) {
+	var bigpos, bigneg big.Int
+	bigpos.SetString("+DEADCAFEBEEFEEBAE", 16)
+	bigneg.SetString("-DEADCAFEBEEFEEBAE", 16)
+	testGenerator(t, bigpos.String(), func(gen *rmarsh.Generator) error {
+		return gen.Bignum(&bigpos)
+	})
+	testGenerator(t, bigneg.String(), func(gen *rmarsh.Generator) error {
+		return gen.Bignum(&bigneg)
+	})
+}
+
+func BenchmarkGenBignum(b *testing.B) {
+	buf := new(bytes.Buffer)
+	gen := rmarsh.NewGenerator(buf)
+	var bnum big.Int
+	bnum.SetString("DEADCAFEBEEFEEBAE", 16)
+
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		gen.Reset()
+
+		if err := gen.Bignum(&bnum); err != nil {
 			b.Fatal(err)
 		}
 	}

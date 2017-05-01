@@ -3,13 +3,8 @@ package rmarsh
 import (
 	"fmt"
 	"io"
+	"math"
 	"math/big"
-)
-
-const (
-	genStateStart = iota
-	genStateTop
-	genStateDone
 )
 
 var ErrGeneratorFinished = fmt.Errorf("Attempting to write value to a finished Marshal stream")
@@ -75,7 +70,9 @@ func (gen *Generator) Bool(b bool) error {
 // it will be encoded as a Bignum instead.
 func (gen *Generator) Fixnum(n int64) error {
 	if n < fixnumMin || n > fixnumMax {
-		return gen.Bignum(big.NewInt(n))
+		var bign big.Int
+		bign.SetInt64(n)
+		return gen.Bignum(&bign)
 	}
 
 	if err := gen.checkState(); err != nil {
@@ -92,7 +89,63 @@ func (gen *Generator) Bignum(b *big.Int) error {
 	if err := gen.checkState(); err != nil {
 		return err
 	}
-	return fmt.Errorf("not implemented yet")
+
+	gen.buf[gen.bufn] = TYPE_BIGNUM
+	gen.bufn++
+	if b.Sign() < 0 {
+		gen.buf[gen.bufn] = '-'
+	} else {
+		gen.buf[gen.bufn] = '+'
+	}
+	gen.bufn++
+
+	// We don't use big.Int.Bytes() for two reasons:
+	// 1) it's an unnecessary buffer allocation which can't be avoided
+	//    (can't provide an existing buffer for big.Int to write into)
+	// 2) the returned buffer is big-endian but Ruby expects le.
+	bits := b.Bits()
+	l := len(bits)
+
+	// Calculate the number of bytes we'll be writing.
+	sz := 0
+	for i, d := range bits {
+		for j := 0; j < _S; j++ {
+			sz++
+			d >>= 8
+			if d == 0 && i == l-1 {
+				break
+			}
+		}
+	}
+
+	// bignum is encoded as a series of shorts. If we have an uneven number of
+	// bytes we gotta pad it out.
+	if sz&1 == 1 {
+		sz++
+	}
+
+	gen.encodeLong(int64(math.Ceil(float64(sz) / 2)))
+
+	w := 0
+	for i, d := range bits {
+		for j := 0; j < _S; j++ {
+			gen.buf[gen.bufn] = byte(d)
+			gen.bufn++
+			w++
+			d >>= 8
+			if d == 0 && i == l-1 {
+				break
+			}
+		}
+	}
+
+	for w < sz {
+		gen.buf[gen.bufn] = 0
+		gen.bufn++
+		w++
+	}
+
+	return gen.writeAdv()
 }
 
 func (gen *Generator) checkState() error {

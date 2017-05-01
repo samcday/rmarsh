@@ -52,3 +52,10 @@ const (
 	// Max number of a bytes a fixnum can occupy
 	fixnumMaxBytes = 5
 )
+
+const (
+	// Ripped from math/big since we deal with the raw Words ourselves
+	_m    = ^big.Word(0)
+	_logS = _m>>8&1 + _m>>16&1 + _m>>32&1
+	_S    = 1 << _logS
+)
