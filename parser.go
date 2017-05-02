@@ -428,11 +428,11 @@ func (p *Parser) long() (int64, error) {
 		if err != nil {
 			return 0, err
 		}
-		bytes := make([]byte, 8)
+		var x int64
 		for i, v := range raw {
-			bytes[i] = v
+			x |= int64(v) << uint(8*i)
 		}
-		return int64(binary.LittleEndian.Uint64(bytes)), nil
+		return x, nil
 	}
 
 	if -129 < c && c < -4 {
