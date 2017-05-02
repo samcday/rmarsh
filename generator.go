@@ -5,6 +5,7 @@ import (
 	"io"
 	"math"
 	"math/big"
+	"strconv"
 )
 
 var ErrGeneratorFinished = fmt.Errorf("Attempting to write value to a finished Marshal stream")
@@ -43,7 +44,7 @@ func (gen *Generator) Reset() {
 
 // Nil writes the nil value to the stream
 func (gen *Generator) Nil() error {
-	if err := gen.checkState(); err != nil {
+	if err := gen.checkState(1); err != nil {
 		return err
 	}
 
@@ -54,7 +55,7 @@ func (gen *Generator) Nil() error {
 
 // Bool writes a true/false value to the stream
 func (gen *Generator) Bool(b bool) error {
-	if err := gen.checkState(); err != nil {
+	if err := gen.checkState(1); err != nil {
 		return err
 	}
 
@@ -79,7 +80,7 @@ func (gen *Generator) Fixnum(n int64) error {
 		return gen.Bignum(&bign)
 	}
 
-	if err := gen.checkState(); err != nil {
+	if err := gen.checkState(fixnumMaxBytes + 1); err != nil {
 		return err
 	}
 
@@ -90,19 +91,6 @@ func (gen *Generator) Fixnum(n int64) error {
 }
 
 func (gen *Generator) Bignum(b *big.Int) error {
-	if err := gen.checkState(); err != nil {
-		return err
-	}
-
-	gen.buf[gen.bufn] = TYPE_BIGNUM
-	gen.bufn++
-	if b.Sign() < 0 {
-		gen.buf[gen.bufn] = '-'
-	} else {
-		gen.buf[gen.bufn] = '+'
-	}
-	gen.bufn++
-
 	// We don't use big.Int.Bytes() for two reasons:
 	// 1) it's an unnecessary buffer allocation which can't be avoided
 	//    (can't provide an existing buffer for big.Int to write into)
@@ -127,6 +115,19 @@ func (gen *Generator) Bignum(b *big.Int) error {
 	if sz&1 == 1 {
 		sz++
 	}
+
+	if err := gen.checkState(2 + fixnumMaxBytes + sz); err != nil {
+		return err
+	}
+
+	gen.buf[gen.bufn] = TYPE_BIGNUM
+	gen.bufn++
+	if b.Sign() < 0 {
+		gen.buf[gen.bufn] = '-'
+	} else {
+		gen.buf[gen.bufn] = '+'
+	}
+	gen.bufn++
 
 	gen.encodeLong(int64(math.Ceil(float64(sz) / 2)))
 
@@ -153,18 +154,17 @@ func (gen *Generator) Bignum(b *big.Int) error {
 }
 
 func (gen *Generator) Symbol(sym string) error {
-	if err := gen.checkState(); err != nil {
-		return err
-	}
-
 	if l := len(gen.symTbl); l == 0 || l == gen.symCount {
 		newTbl := make([]string, l+symTblGrowSize)
 		copy(newTbl, gen.symTbl)
 		gen.symTbl = newTbl
 	}
 
-	for i, v := range gen.symTbl {
-		if v == sym {
+	for i := 0; i < gen.symCount; i++ {
+		if gen.symTbl[i] == sym {
+			if err := gen.checkState(1 + fixnumMaxBytes); err != nil {
+				return err
+			}
 			gen.buf[gen.bufn] = TYPE_SYMLINK
 			gen.bufn++
 			gen.encodeLong(int64(i))
@@ -172,10 +172,15 @@ func (gen *Generator) Symbol(sym string) error {
 		}
 	}
 
+	l := len(sym)
+
+	if err := gen.checkState(1 + fixnumMaxBytes + l); err != nil {
+		return err
+	}
+
 	gen.buf[gen.bufn] = TYPE_SYMBOL
 	gen.bufn++
 
-	l := len(sym)
 	gen.encodeLong(int64(l))
 	copy(gen.buf[gen.bufn:], sym)
 	gen.bufn += l
@@ -186,9 +191,44 @@ func (gen *Generator) Symbol(sym string) error {
 	return gen.writeAdv()
 }
 
-func (gen *Generator) checkState() error {
+func (gen *Generator) String(str string) error {
+	l := len(str)
+	if err := gen.checkState(1 + fixnumMaxBytes + l); err != nil {
+		return err
+	}
+
+	gen.buf[gen.bufn] = TYPE_STRING
+	gen.bufn++
+	gen.encodeLong(int64(l))
+	copy(gen.buf[gen.bufn:], str)
+	gen.bufn += l
+
+	return gen.writeAdv()
+}
+
+func (gen *Generator) Float(f float64) error {
+	str := strconv.FormatFloat(f, 'g', -1, 64)
+	l := len(str)
+
+	if err := gen.checkState(1 + fixnumMaxBytes + l); err != nil {
+		return err
+	}
+
+	gen.buf[gen.bufn] = TYPE_FLOAT
+	gen.bufn++
+	gen.encodeLong(int64(l))
+	copy(gen.buf[gen.bufn:], str)
+	gen.bufn += l
+	return gen.writeAdv()
+}
+
+func (gen *Generator) checkState(sz int) error {
 	if gen.st.sz == 0 {
 		return ErrGeneratorFinished
+	}
+
+	if len(gen.buf) < sz {
+		gen.buf = make([]byte, sz)
 	}
 
 	// If we're in top level ctx and haven't written anything yet, then we

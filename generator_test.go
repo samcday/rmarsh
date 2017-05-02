@@ -150,3 +150,43 @@ func BenchmarkGenSymbol(b *testing.B) {
 		}
 	}
 }
+
+func TestGenString(t *testing.T) {
+	testGenerator(t, `"foobar"`, func(gen *rmarsh.Generator) error {
+		return gen.String("foobar")
+	})
+}
+
+func BenchmarkGenString(b *testing.B) {
+	buf := new(bytes.Buffer)
+	gen := rmarsh.NewGenerator(buf)
+
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		gen.Reset()
+
+		if err := gen.String("test"); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func TestGenFloat(t *testing.T) {
+	testGenerator(t, `123.123123123`, func(gen *rmarsh.Generator) error {
+		return gen.Float(123.123123123)
+	})
+}
+
+func BenchmarkGenFloat(b *testing.B) {
+	buf := new(bytes.Buffer)
+	gen := rmarsh.NewGenerator(buf)
+
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		gen.Reset()
+
+		if err := gen.Float(123.123123123); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
