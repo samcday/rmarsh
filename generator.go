@@ -260,8 +260,12 @@ func (gen *Generator) checkState(sz int) error {
 		}
 	}
 
-	if len(gen.buf) < sz {
-		gen.buf = make([]byte, sz)
+	if len(gen.buf) < gen.bufn+sz {
+		newBuf := make([]byte, gen.bufn+sz)
+		if gen.bufn > 0 {
+			copy(newBuf, gen.buf)
+		}
+		gen.buf = newBuf
 	}
 
 	// If we're in top level ctx and haven't written anything yet, then we
@@ -279,7 +283,9 @@ func (gen *Generator) checkState(sz int) error {
 func (gen *Generator) writeAdv() error {
 	gen.st.cur.pos++
 
-	if gen.bufn > 0 {
+	// If we've just finished writing out the last value, then we make sure to flush anything remaining.
+	// Otherwise, we let things accumulate in our small buffer between calls to reduce the number of writes.
+	if gen.bufn > 0 && gen.st.cur.pos == gen.st.cur.cnt && gen.st.sz == 1 {
 		if _, err := gen.w.Write(gen.buf[:gen.bufn]); err != nil {
 			return err
 		}
