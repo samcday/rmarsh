@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"io/ioutil"
 	"math/big"
 	"testing"
 
@@ -30,11 +31,9 @@ func TestGenNil(t *testing.T) {
 }
 
 func BenchmarkGenNil(b *testing.B) {
-	buf := new(bytes.Buffer)
-	gen := rmarsh.NewGenerator(buf)
+	gen := rmarsh.NewGenerator(ioutil.Discard)
 
 	for i := 0; i < b.N; i++ {
-		buf.Reset()
 		gen.Reset()
 
 		if err := gen.Nil(); err != nil {
@@ -64,11 +63,9 @@ func TestGenBool(t *testing.T) {
 }
 
 func BenchmarkGenBool(b *testing.B) {
-	buf := new(bytes.Buffer)
-	gen := rmarsh.NewGenerator(buf)
+	gen := rmarsh.NewGenerator(ioutil.Discard)
 
 	for i := 0; i < b.N; i++ {
-		buf.Reset()
 		gen.Reset()
 
 		if err := gen.Bool(true); err != nil {
@@ -90,11 +87,9 @@ func TestGenFixnums(t *testing.T) {
 }
 
 func BenchmarkGenFixnum(b *testing.B) {
-	buf := new(bytes.Buffer)
-	gen := rmarsh.NewGenerator(buf)
+	gen := rmarsh.NewGenerator(ioutil.Discard)
 
 	for i := 0; i < b.N; i++ {
-		buf.Reset()
 		gen.Reset()
 
 		if err := gen.Fixnum(123); err != nil {
@@ -116,13 +111,11 @@ func TestGenBignum(t *testing.T) {
 }
 
 func BenchmarkGenBignum(b *testing.B) {
-	buf := new(bytes.Buffer)
-	gen := rmarsh.NewGenerator(buf)
+	gen := rmarsh.NewGenerator(ioutil.Discard)
 	var bnum big.Int
 	bnum.SetString("DEADCAFEBEEFEEBAE", 16)
 
 	for i := 0; i < b.N; i++ {
-		buf.Reset()
 		gen.Reset()
 
 		if err := gen.Bignum(&bnum); err != nil {
@@ -138,11 +131,9 @@ func TestGenSymbol(t *testing.T) {
 }
 
 func BenchmarkGenSymbol(b *testing.B) {
-	buf := new(bytes.Buffer)
-	gen := rmarsh.NewGenerator(buf)
+	gen := rmarsh.NewGenerator(ioutil.Discard)
 
 	for i := 0; i < b.N; i++ {
-		buf.Reset()
 		gen.Reset()
 
 		if err := gen.Symbol("test"); err != nil {
@@ -158,11 +149,9 @@ func TestGenString(t *testing.T) {
 }
 
 func BenchmarkGenString(b *testing.B) {
-	buf := new(bytes.Buffer)
-	gen := rmarsh.NewGenerator(buf)
+	gen := rmarsh.NewGenerator(ioutil.Discard)
 
 	for i := 0; i < b.N; i++ {
-		buf.Reset()
 		gen.Reset()
 
 		if err := gen.String("test"); err != nil {
@@ -178,11 +167,9 @@ func TestGenFloat(t *testing.T) {
 }
 
 func BenchmarkGenFloat(b *testing.B) {
-	buf := new(bytes.Buffer)
-	gen := rmarsh.NewGenerator(buf)
+	gen := rmarsh.NewGenerator(ioutil.Discard)
 
 	for i := 0; i < b.N; i++ {
-		buf.Reset()
 		gen.Reset()
 
 		if err := gen.Float(123.123123123); err != nil {
