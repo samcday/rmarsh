@@ -245,9 +245,10 @@ func (gen *Generator) checkState(sz int) error {
 // Writes the given bytes if provided, then advances current state of the generator.
 func (gen *Generator) writeAdv() error {
 	if gen.bufn > 0 {
-		if err := gen.write(gen.buf[:gen.bufn]); err != nil {
+		if _, err := gen.w.Write(gen.buf[:gen.bufn]); err != nil {
 			return err
 		}
+		gen.c += gen.bufn
 		gen.bufn = 0
 	}
 
@@ -285,17 +286,6 @@ func (gen *Generator) encodeLong(n int64) {
 		}
 	}
 	panic("Shouldn't *ever* reach here")
-}
-
-func (gen *Generator) write(b []byte) error {
-	l := len(b)
-	if n, err := gen.w.Write(b); err != nil {
-		return err
-	} else if n != l {
-		return fmt.Errorf("I/O underflow %d != %d", n, l)
-	}
-	gen.c += l
-	return nil
 }
 
 const (

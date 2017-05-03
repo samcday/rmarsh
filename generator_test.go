@@ -30,6 +30,14 @@ func TestGenNil(t *testing.T) {
 	})
 }
 
+func BenchmarkGenReset(b *testing.B) {
+	gen := rmarsh.NewGenerator(ioutil.Discard)
+
+	for i := 0; i < b.N; i++ {
+		gen.Reset()
+	}
+}
+
 func BenchmarkGenNil(b *testing.B) {
 	gen := rmarsh.NewGenerator(ioutil.Discard)
 
