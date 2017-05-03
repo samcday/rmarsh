@@ -6,9 +6,12 @@ import (
 	"math"
 	"math/big"
 	"strconv"
+
+	"github.com/pkg/errors"
 )
 
-var ErrGeneratorFinished = fmt.Errorf("Attempting to write value to a finished Marshal stream")
+var ErrGeneratorFinished = fmt.Errorf("Write on finished Marshal stream")
+var ErrGeneratorOverflow = fmt.Errorf("Write past end of bounded array/hash/ivar")
 
 const (
 	genStateGrowSize = 8 // Initial size + amount to grow state stack by
@@ -31,12 +34,12 @@ func NewGenerator(w io.Writer) *Generator {
 		w:   w,
 		buf: make([]byte, 128),
 	}
-	gen.st.stack = make([]genStateItem, genStateGrowSize)
-	gen.st.reset()
+	gen.st.push(genStTop, 1)
 	return gen
 }
 
 func (gen *Generator) Reset() {
+	gen.bufn = 0
 	gen.c = 0
 	gen.st.reset()
 	gen.symCount = 0
@@ -219,12 +222,42 @@ func (gen *Generator) Float(f float64) error {
 	gen.encodeLong(int64(l))
 	copy(gen.buf[gen.bufn:], str)
 	gen.bufn += l
+
+	return gen.writeAdv()
+}
+
+func (gen *Generator) StartArray(l int) error {
+	if err := gen.checkState(1 + fixnumMaxBytes); err != nil {
+		return err
+	}
+	gen.buf[gen.bufn] = TYPE_ARRAY
+	gen.bufn++
+	gen.encodeLong(int64(l))
+
+	gen.st.push(genStArr, l)
+	return nil
+}
+
+func (gen *Generator) EndArray() error {
+	if gen.st.sz == 0 || gen.st.cur.typ != genStArr {
+		return errors.New("EndArray() called outside of context of array")
+	}
+	if gen.st.cur.pos != gen.st.cur.cnt {
+		return errors.Errorf("EndArray() called prematurely, %d of %d elems written", gen.st.cur.pos, gen.st.cur.cnt)
+	}
+	gen.st.pop()
+
 	return gen.writeAdv()
 }
 
 func (gen *Generator) checkState(sz int) error {
-	if gen.st.sz == 0 {
-		return ErrGeneratorFinished
+	// Make sure we're not writing past bounds.
+	if gen.st.cur.pos == gen.st.cur.cnt {
+		if gen.st.sz == 1 {
+			return ErrGeneratorFinished
+		} else {
+			return ErrGeneratorOverflow
+		}
 	}
 
 	if len(gen.buf) < sz {
@@ -233,7 +266,7 @@ func (gen *Generator) checkState(sz int) error {
 
 	// If we're in top level ctx and haven't written anything yet, then we
 	// gotta write the magic.
-	if gen.st.cur.pos == 0 && gen.st.sz == 1 {
+	if gen.st.sz == 1 && gen.st.cur.pos == 0 {
 		gen.buf[0] = 0x04
 		gen.buf[1] = 0x08
 		gen.bufn += 2
@@ -244,6 +277,8 @@ func (gen *Generator) checkState(sz int) error {
 
 // Writes the given bytes if provided, then advances current state of the generator.
 func (gen *Generator) writeAdv() error {
+	gen.st.cur.pos++
+
 	if gen.bufn > 0 {
 		if _, err := gen.w.Write(gen.buf[:gen.bufn]); err != nil {
 			return err
@@ -252,7 +287,6 @@ func (gen *Generator) writeAdv() error {
 		gen.bufn = 0
 	}
 
-	gen.st.adv()
 	return nil
 }
 
@@ -319,10 +353,25 @@ func (st *genState) reset() {
 	st.stack[0].reset(1, genStTop)
 }
 
-func (st *genState) adv() {
-	st.cur.pos++
-	// If we've finished with the current ctx, we pop it
-	if st.cur.pos == st.cur.cnt {
-		st.sz--
+func (st *genState) push(typ uint8, cnt int) {
+	if st.sz == len(st.stack) {
+		newSt := make([]genStateItem, st.sz+genStateGrowSize)
+		copy(newSt, st.stack)
+		st.stack = newSt
+	}
+
+	st.stack[st.sz].typ = typ
+	st.stack[st.sz].cnt = cnt
+	st.stack[st.sz].pos = 0
+	st.cur = &st.stack[st.sz]
+	st.sz++
+}
+
+func (st *genState) pop() {
+	st.sz--
+	if st.sz > 0 {
+		st.cur = &st.stack[st.sz-1]
+	} else {
+		st.cur = nil
 	}
 }

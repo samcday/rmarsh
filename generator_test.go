@@ -185,3 +185,72 @@ func BenchmarkGenFloat(b *testing.B) {
 		}
 	}
 }
+
+func TestGenArray(t *testing.T) {
+	testGenerator(t, `[false, true, nil]`, func(gen *rmarsh.Generator) error {
+		if err := gen.StartArray(3); err != nil {
+			return err
+		}
+		if err := gen.Bool(false); err != nil {
+			return err
+		}
+		if err := gen.Bool(true); err != nil {
+			return err
+		}
+		if err := gen.Nil(); err != nil {
+			return err
+		}
+		return gen.EndArray()
+	})
+}
+
+func TestGenArrayOverflow(t *testing.T) {
+	gen := rmarsh.NewGenerator(ioutil.Discard)
+	if err := gen.StartArray(1); err != nil {
+		t.Fatal(err)
+	}
+	if err := gen.Nil(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gen.Nil(); err != rmarsh.ErrGeneratorOverflow {
+		t.Fatalf("Unexpected error %+v", err)
+	}
+}
+
+func BenchmarkGenArray(b *testing.B) {
+	gen := rmarsh.NewGenerator(ioutil.Discard)
+
+	for i := 0; i < b.N; i++ {
+		gen.Reset()
+
+		if err := gen.StartArray(1); err != nil {
+			b.Fatal(err)
+		}
+		if err := gen.Nil(); err != nil {
+			b.Fatal(err)
+		}
+		if err := gen.EndArray(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkGenLargeArray(b *testing.B) {
+	gen := rmarsh.NewGenerator(ioutil.Discard)
+
+	for i := 0; i < b.N; i++ {
+		gen.Reset()
+
+		if err := gen.StartArray(10); err != nil {
+			b.Fatal(err)
+		}
+		for i := 0; i < 10; i++ {
+			if err := gen.Nil(); err != nil {
+				b.Fatal(err)
+			}
+		}
+		if err := gen.EndArray(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
