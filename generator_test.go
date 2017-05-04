@@ -34,7 +34,7 @@ func BenchmarkGenReset(b *testing.B) {
 	gen := rmarsh.NewGenerator(ioutil.Discard)
 
 	for i := 0; i < b.N; i++ {
-		gen.Reset()
+		gen.Reset(nil)
 	}
 }
 
@@ -42,7 +42,7 @@ func BenchmarkGenNil(b *testing.B) {
 	gen := rmarsh.NewGenerator(ioutil.Discard)
 
 	for i := 0; i < b.N; i++ {
-		gen.Reset()
+		gen.Reset(nil)
 
 		if err := gen.Nil(); err != nil {
 			b.Fatal(err)
@@ -74,7 +74,7 @@ func BenchmarkGenBool(b *testing.B) {
 	gen := rmarsh.NewGenerator(ioutil.Discard)
 
 	for i := 0; i < b.N; i++ {
-		gen.Reset()
+		gen.Reset(nil)
 
 		if err := gen.Bool(true); err != nil {
 			b.Fatal(err)
@@ -98,7 +98,7 @@ func BenchmarkGenFixnum(b *testing.B) {
 	gen := rmarsh.NewGenerator(ioutil.Discard)
 
 	for i := 0; i < b.N; i++ {
-		gen.Reset()
+		gen.Reset(nil)
 
 		if err := gen.Fixnum(123); err != nil {
 			b.Fatal(err)
@@ -124,7 +124,7 @@ func BenchmarkGenBignum(b *testing.B) {
 	bnum.SetString("DEADCAFEBEEFEEBAE", 16)
 
 	for i := 0; i < b.N; i++ {
-		gen.Reset()
+		gen.Reset(nil)
 
 		if err := gen.Bignum(&bnum); err != nil {
 			b.Fatal(err)
@@ -142,7 +142,7 @@ func BenchmarkGenSymbol(b *testing.B) {
 	gen := rmarsh.NewGenerator(ioutil.Discard)
 
 	for i := 0; i < b.N; i++ {
-		gen.Reset()
+		gen.Reset(nil)
 
 		if err := gen.Symbol("test"); err != nil {
 			b.Fatal(err)
@@ -160,7 +160,7 @@ func BenchmarkGenString(b *testing.B) {
 	gen := rmarsh.NewGenerator(ioutil.Discard)
 
 	for i := 0; i < b.N; i++ {
-		gen.Reset()
+		gen.Reset(nil)
 
 		if err := gen.String("test"); err != nil {
 			b.Fatal(err)
@@ -178,7 +178,7 @@ func BenchmarkGenFloat(b *testing.B) {
 	gen := rmarsh.NewGenerator(ioutil.Discard)
 
 	for i := 0; i < b.N; i++ {
-		gen.Reset()
+		gen.Reset(nil)
 
 		if err := gen.Float(123.123123123); err != nil {
 			b.Fatal(err)
@@ -221,7 +221,7 @@ func BenchmarkGenArray(b *testing.B) {
 	gen := rmarsh.NewGenerator(ioutil.Discard)
 
 	for i := 0; i < b.N; i++ {
-		gen.Reset()
+		gen.Reset(nil)
 
 		if err := gen.StartArray(1); err != nil {
 			b.Fatal(err)
@@ -239,7 +239,7 @@ func BenchmarkGenLargeArray(b *testing.B) {
 	gen := rmarsh.NewGenerator(ioutil.Discard)
 
 	for i := 0; i < b.N; i++ {
-		gen.Reset()
+		gen.Reset(nil)
 
 		if err := gen.StartArray(10); err != nil {
 			b.Fatal(err)
@@ -274,7 +274,7 @@ func BenchmarkGenHash(b *testing.B) {
 	gen := rmarsh.NewGenerator(ioutil.Discard)
 
 	for i := 0; i < b.N; i++ {
-		gen.Reset()
+		gen.Reset(nil)
 
 		if err := gen.StartHash(1); err != nil {
 			b.Fatal(err)
@@ -301,7 +301,7 @@ func BenchmarkGenClass(b *testing.B) {
 	gen := rmarsh.NewGenerator(ioutil.Discard)
 
 	for i := 0; i < b.N; i++ {
-		gen.Reset()
+		gen.Reset(nil)
 
 		if err := gen.Class("File"); err != nil {
 			b.Fatal(err)
@@ -319,9 +319,9 @@ func BenchmarkGenModule(b *testing.B) {
 	gen := rmarsh.NewGenerator(ioutil.Discard)
 
 	for i := 0; i < b.N; i++ {
-		gen.Reset()
+		gen.Reset(nil)
 
-		if err := gen.Module("File"); err != nil {
+		if err := gen.Module("Process"); err != nil {
 			b.Fatal(err)
 		}
 	}

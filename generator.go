@@ -34,11 +34,18 @@ func NewGenerator(w io.Writer) *Generator {
 		w:   w,
 		buf: make([]byte, 128),
 	}
-	gen.Reset()
+	gen.Reset(nil)
 	return gen
 }
 
-func (gen *Generator) Reset() {
+// Reset restores the state of the Generator to an identity state, ready to write a new Marshal stream.
+// If provided io.Writer is nil, the existing writer is used.
+// Reusing Generators is encouraged, to recycle the internal structures that are allocated during generation.
+func (gen *Generator) Reset(w io.Writer) {
+	if w != nil {
+		gen.w = w
+	}
+
 	gen.st.reset()
 
 	gen.c = 0
@@ -49,7 +56,7 @@ func (gen *Generator) Reset() {
 	gen.bufn = 2
 }
 
-// Nil writes the nil value to the stream
+// Nil writes the nil value to the Marshal stream.
 func (gen *Generator) Nil() error {
 	if err := gen.checkState(1); err != nil {
 		return err
@@ -60,7 +67,7 @@ func (gen *Generator) Nil() error {
 	return gen.writeAdv()
 }
 
-// Bool writes a true/false value to the stream
+// Bool writes a true/false value to the Marshal stream.
 func (gen *Generator) Bool(b bool) error {
 	if err := gen.checkState(1); err != nil {
 		return err
@@ -76,10 +83,9 @@ func (gen *Generator) Bool(b bool) error {
 	return gen.writeAdv()
 }
 
-// Fixnum writes a signed/unsigned number to the stream.
-// Ruby has bounds on what can be encoded as a fixnum, those bounds are
-// less than the range an int64 can cover. If the provided number overflows
-// it will be encoded as a Bignum instead.
+// Fixnum writes a signed/unsigned number to the Marshal stream.
+// Ruby has bounds on what can be encoded as a fixnum, those bounds are less than the range an int64 can cover. If the
+// provided number overflows it will be encoded as a Bignum instead.
 func (gen *Generator) Fixnum(n int64) error {
 	if n < fixnumMin || n > fixnumMax {
 		var bign big.Int
@@ -97,6 +103,7 @@ func (gen *Generator) Fixnum(n int64) error {
 	return gen.writeAdv()
 }
 
+// Bignum writes a big.Int value to the Marshal stream.
 func (gen *Generator) Bignum(b *big.Int) error {
 	// We don't use big.Int.Bytes() for two reasons:
 	// 1) it's an unnecessary buffer allocation which can't be avoided
@@ -160,6 +167,9 @@ func (gen *Generator) Bignum(b *big.Int) error {
 	return gen.writeAdv()
 }
 
+// Symbol writes a Ruby symbol value to the Marshal stream.
+// The generator automatically handles writing "symlink" values to the stream if the symbol name has already been
+// written in this Marshal stream.
 func (gen *Generator) Symbol(sym string) error {
 	if l := len(gen.symTbl); l == 0 || l == gen.symCount {
 		newTbl := make([]string, l+symTblGrowSize)
@@ -198,6 +208,8 @@ func (gen *Generator) Symbol(sym string) error {
 	return gen.writeAdv()
 }
 
+// String writes the given string to the Marshal stream.
+// Be sure to call StartIVar first if you need to include encoding information.
 func (gen *Generator) String(str string) error {
 	l := len(str)
 	if err := gen.checkState(1 + fixnumMaxBytes + l); err != nil {
@@ -213,6 +225,7 @@ func (gen *Generator) String(str string) error {
 	return gen.writeAdv()
 }
 
+// Float writes the given float value to the Marshal stream.
 func (gen *Generator) Float(f float64) error {
 	// String repr of a float64 will never exceed 30 chars.
 	// That also means the len encoded long will never exceed 1 byte.
@@ -235,6 +248,8 @@ func (gen *Generator) Float(f float64) error {
 	return gen.writeAdv()
 }
 
+// StartArray begins writing an array to the Marshal stream.
+// When all elements are written, EndArray() must be called.
 func (gen *Generator) StartArray(l int) error {
 	if err := gen.checkState(1 + fixnumMaxBytes); err != nil {
 		return err
@@ -247,6 +262,7 @@ func (gen *Generator) StartArray(l int) error {
 	return nil
 }
 
+// EndArray completes the array currently being generated.
 func (gen *Generator) EndArray() error {
 	if gen.st.sz == 0 || gen.st.cur.typ != genStArr {
 		return errors.New("EndArray() called outside of context of array")
@@ -259,6 +275,8 @@ func (gen *Generator) EndArray() error {
 	return gen.writeAdv()
 }
 
+// StartHash behins writing a hash to the Marshal stream.
+// When all elements are written, EndHash() must be called.
 func (gen *Generator) StartHash(l int) error {
 	if err := gen.checkState(1 + fixnumMaxBytes); err != nil {
 		return err
@@ -271,6 +289,7 @@ func (gen *Generator) StartHash(l int) error {
 	return nil
 }
 
+// EndHash completes the hash currently being generated.
 func (gen *Generator) EndHash() error {
 	if gen.st.sz == 0 || gen.st.cur.typ != genStHash {
 		return errors.New("EndHash() called outside of context of hash")
@@ -283,6 +302,7 @@ func (gen *Generator) EndHash() error {
 	return gen.writeAdv()
 }
 
+// Class writes a Ruby class reference to the Marshal stream.
 func (gen *Generator) Class(name string) error {
 	l := len(name)
 	if err := gen.checkState(1 + fixnumMaxBytes + l); err != nil {
@@ -298,6 +318,7 @@ func (gen *Generator) Class(name string) error {
 	return gen.writeAdv()
 }
 
+// Module writes a Ruby module reference to the Marshal stream.
 func (gen *Generator) Module(name string) error {
 	l := len(name)
 	if err := gen.checkState(1 + fixnumMaxBytes + l); err != nil {
