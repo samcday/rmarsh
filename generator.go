@@ -210,17 +210,22 @@ func (gen *Generator) String(str string) error {
 }
 
 func (gen *Generator) Float(f float64) error {
-	str := strconv.FormatFloat(f, 'g', -1, 64)
-	l := len(str)
-
-	if err := gen.checkState(1 + fixnumMaxBytes + l); err != nil {
+	// String repr of a float64 will never exceed 30 chars.
+	// That also means the len encoded long will never exceed 1 byte.
+	if err := gen.checkState(1 + 1 + 30); err != nil {
 		return err
 	}
 
 	gen.buf[gen.bufn] = TYPE_FLOAT
 	gen.bufn++
+
+	// We pass a 0 len slice of our scratch buffer to append float.
+	// This ensures it makes no allocation since the append() calls it makes
+	// will just consume existing capacity.
+	b := strconv.AppendFloat(gen.buf[gen.bufn+1:gen.bufn+1:len(gen.buf)], f, 'g', -1, 64)
+	l := len(b)
+
 	gen.encodeLong(int64(l))
-	copy(gen.buf[gen.bufn:], str)
 	gen.bufn += l
 
 	return gen.writeAdv()
