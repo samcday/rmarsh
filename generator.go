@@ -34,15 +34,19 @@ func NewGenerator(w io.Writer) *Generator {
 		w:   w,
 		buf: make([]byte, 128),
 	}
-	gen.st.push(genStTop, 1)
+	gen.Reset()
 	return gen
 }
 
 func (gen *Generator) Reset() {
-	gen.bufn = 0
-	gen.c = 0
 	gen.st.reset()
+
+	gen.c = 0
 	gen.symCount = 0
+
+	gen.buf[0] = 0x04
+	gen.buf[1] = 0x08
+	gen.bufn = 2
 }
 
 // Nil writes the nil value to the stream
@@ -273,14 +277,6 @@ func (gen *Generator) checkState(sz int) error {
 		gen.buf = newBuf
 	}
 
-	// If we're in top level ctx and haven't written anything yet, then we
-	// gotta write the magic.
-	if gen.st.sz == 1 && gen.st.cur.pos == 0 {
-		gen.buf[0] = 0x04
-		gen.buf[1] = 0x08
-		gen.bufn += 2
-	}
-
 	return nil
 }
 
@@ -359,9 +355,8 @@ type genState struct {
 // Resets generator state back to initial state (which is ready for a new
 // top level value to be written)
 func (st *genState) reset() {
-	st.sz = 1
-	st.cur = &st.stack[0]
-	st.stack[0].reset(1, genStTop)
+	st.sz = 0
+	st.push(genStTop, 1)
 }
 
 func (st *genState) push(typ uint8, cnt int) {
