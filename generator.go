@@ -259,6 +259,30 @@ func (gen *Generator) EndArray() error {
 	return gen.writeAdv()
 }
 
+func (gen *Generator) StartHash(l int) error {
+	if err := gen.checkState(1 + fixnumMaxBytes); err != nil {
+		return err
+	}
+	gen.buf[gen.bufn] = TYPE_HASH
+	gen.bufn++
+	gen.encodeLong(int64(l))
+
+	gen.st.push(genStHash, l*2)
+	return nil
+}
+
+func (gen *Generator) EndHash() error {
+	if gen.st.sz == 0 || gen.st.cur.typ != genStHash {
+		return errors.New("EndHash() called outside of context of hash")
+	}
+	if gen.st.cur.pos != gen.st.cur.cnt {
+		return errors.Errorf("EndHash() called prematurely, %d of %d elems written", gen.st.cur.pos, gen.st.cur.cnt)
+	}
+	gen.st.pop()
+
+	return gen.writeAdv()
+}
+
 func (gen *Generator) checkState(sz int) error {
 	// Make sure we're not writing past bounds.
 	if gen.st.cur.pos == gen.st.cur.cnt {
@@ -332,6 +356,7 @@ func (gen *Generator) encodeLong(n int64) {
 const (
 	genStTop = iota
 	genStArr
+	genStHash
 )
 
 type genStateItem struct {

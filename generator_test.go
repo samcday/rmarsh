@@ -254,3 +254,39 @@ func BenchmarkGenLargeArray(b *testing.B) {
 		}
 	}
 }
+
+func TestGenHash(t *testing.T) {
+	testGenerator(t, `{:foo=>123}`, func(gen *rmarsh.Generator) error {
+		if err := gen.StartHash(1); err != nil {
+			return err
+		}
+		if err := gen.Symbol("foo"); err != nil {
+			return err
+		}
+		if err := gen.Fixnum(123); err != nil {
+			return err
+		}
+		return gen.EndHash()
+	})
+}
+
+func BenchmarkGenHash(b *testing.B) {
+	gen := rmarsh.NewGenerator(ioutil.Discard)
+
+	for i := 0; i < b.N; i++ {
+		gen.Reset()
+
+		if err := gen.StartHash(1); err != nil {
+			b.Fatal(err)
+		}
+		if err := gen.Symbol("test"); err != nil {
+			b.Fatal(err)
+		}
+		if err := gen.Fixnum(123); err != nil {
+			b.Fatal(err)
+		}
+		if err := gen.EndHash(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
