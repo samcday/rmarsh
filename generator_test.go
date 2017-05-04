@@ -290,3 +290,39 @@ func BenchmarkGenHash(b *testing.B) {
 		}
 	}
 }
+
+func TestGenClass(t *testing.T) {
+	testGenerator(t, `Class<File>`, func(gen *rmarsh.Generator) error {
+		return gen.Class("File")
+	})
+}
+
+func BenchmarkGenClass(b *testing.B) {
+	gen := rmarsh.NewGenerator(ioutil.Discard)
+
+	for i := 0; i < b.N; i++ {
+		gen.Reset()
+
+		if err := gen.Class("File"); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func TestGenModule(t *testing.T) {
+	testGenerator(t, `Module<Process>`, func(gen *rmarsh.Generator) error {
+		return gen.Module("Process")
+	})
+}
+
+func BenchmarkGenModule(b *testing.B) {
+	gen := rmarsh.NewGenerator(ioutil.Discard)
+
+	for i := 0; i < b.N; i++ {
+		gen.Reset()
+
+		if err := gen.Module("File"); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

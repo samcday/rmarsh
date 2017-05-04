@@ -110,19 +110,19 @@ func TestEncodeStrings(t *testing.T) {
 }
 
 func TestEncodeClass(t *testing.T) {
-	testRubyDecode(t, rmarsh.Class("Gem::Version"), "Gem::Version")
+	testRubyDecode(t, rmarsh.Class("Gem::Version"), "Class<Gem::Version>")
 
 	// Ptrs
 	v := rmarsh.Class("Gem::Version")
-	testRubyDecode(t, &v, "Gem::Version")
+	testRubyDecode(t, &v, "Class<Gem::Version>")
 }
 
 func TestEncodeModule(t *testing.T) {
-	testRubyDecode(t, rmarsh.Module("Gem"), "Gem")
+	testRubyDecode(t, rmarsh.Module("Gem"), "Module<Gem>")
 
 	// Ptrs
 	v := rmarsh.Module("Gem")
-	testRubyDecode(t, &v, "Gem")
+	testRubyDecode(t, &v, "Module<Gem>")
 }
 
 func TestEncodeSlices(t *testing.T) {

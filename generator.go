@@ -283,6 +283,36 @@ func (gen *Generator) EndHash() error {
 	return gen.writeAdv()
 }
 
+func (gen *Generator) Class(name string) error {
+	l := len(name)
+	if err := gen.checkState(1 + fixnumMaxBytes + l); err != nil {
+		return err
+	}
+
+	gen.buf[gen.bufn] = TYPE_CLASS
+	gen.bufn++
+	gen.encodeLong(int64(l))
+	copy(gen.buf[gen.bufn:], name)
+	gen.bufn += l
+
+	return gen.writeAdv()
+}
+
+func (gen *Generator) Module(name string) error {
+	l := len(name)
+	if err := gen.checkState(1 + fixnumMaxBytes + l); err != nil {
+		return err
+	}
+
+	gen.buf[gen.bufn] = TYPE_MODULE
+	gen.bufn++
+	gen.encodeLong(int64(l))
+	copy(gen.buf[gen.bufn:], name)
+	gen.bufn += l
+
+	return gen.writeAdv()
+}
+
 func (gen *Generator) checkState(sz int) error {
 	// Make sure we're not writing past bounds.
 	if gen.st.cur.pos == gen.st.cur.cnt {

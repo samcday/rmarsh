@@ -10,6 +10,16 @@ class Object
     "\#Object<#{instance_variables.sort.map{|k|k.inspect+'='+instance_variable_get(k).to_s}.join(' ')}>"
   end
 end
+class Class
+  def inspect
+    "Class<#{name}>"
+  end
+end
+class Module
+  def inspect
+    "Module<#{name}>"
+  end
+end
 
 $stdout.sync = true
 
