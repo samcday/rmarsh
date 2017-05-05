@@ -168,10 +168,9 @@ func (gen *Generator) Bignum(b *big.Int) error {
 	return gen.writeAdv()
 }
 
-// Symbol writes a Ruby symbol value to the Marshal stream.
-// The generator automatically handles writing "symlink" values to the stream if the symbol name has already been
-// written in this Marshal stream.
-func (gen *Generator) Symbol(sym string) error {
+// Writes given symbol (or a symlink if symbol already written before) but does not check state or advance write state.
+// Intended to be used where symbols are embedded in other value types (like StartObject)
+func (gen *Generator) writeSym(sym string) {
 	if l := len(gen.symTbl); l == 0 || l == gen.symCount {
 		newTbl := make([]string, l+symTblGrowSize)
 		copy(newTbl, gen.symTbl)
@@ -180,31 +179,33 @@ func (gen *Generator) Symbol(sym string) error {
 
 	for i := 0; i < gen.symCount; i++ {
 		if gen.symTbl[i] == sym {
-			if err := gen.checkState(true, 1+fixnumMaxBytes); err != nil {
-				return err
-			}
 			gen.buf[gen.bufn] = TYPE_SYMLINK
 			gen.bufn++
 			gen.encodeLong(int64(i))
-			return gen.writeAdv()
+			return
 		}
 	}
 
 	l := len(sym)
-
-	if err := gen.checkState(true, 1+fixnumMaxBytes+l); err != nil {
-		return err
-	}
-
 	gen.buf[gen.bufn] = TYPE_SYMBOL
 	gen.bufn++
-
 	gen.encodeLong(int64(l))
 	copy(gen.buf[gen.bufn:], sym)
 	gen.bufn += l
 
 	gen.symTbl[gen.symCount] = sym
 	gen.symCount++
+}
+
+// Symbol writes a Ruby symbol value to the Marshal stream.
+// The generator automatically handles writing "symlink" values to the stream if the symbol name has already been
+// written in this Marshal stream.
+func (gen *Generator) Symbol(sym string) error {
+	if err := gen.checkState(true, 1+fixnumMaxBytes+len(sym)); err != nil {
+		return err
+	}
+
+	gen.writeSym(sym)
 
 	return gen.writeAdv()
 }
@@ -353,12 +354,45 @@ func (gen *Generator) StartIVar(l int) error {
 	return nil
 }
 
+// EndIVar completes the ivar currently being generated.
 func (gen *Generator) EndIVar() error {
 	if gen.st.sz == 0 || gen.st.cur.typ != genStIVar {
 		return errors.New("EndIVar() called outside of context of ivar")
 	}
 	if gen.st.cur.pos != gen.st.cur.cnt {
 		return errors.Errorf("EndIVar() called prematurely, %d of %d elems written", gen.st.cur.pos, gen.st.cur.cnt)
+	}
+	gen.st.pop()
+
+	return gen.writeAdv()
+}
+
+// StartObject begins writing an object with provided class name to the Marshal stream.
+// The next calls must be l pairs of Symbol+<any> calls.
+func (gen *Generator) StartObject(name string, l int) error {
+	// Need enough space for the two type bytes (object + symbol), the encoded length of the symbol, and the encoded
+	// length of the object variables.
+	if err := gen.checkState(false, 1+1+fixnumMaxBytes+len(name)+fixnumMaxBytes); err != nil {
+		return err
+	}
+	gen.buf[gen.bufn] = TYPE_OBJECT
+	gen.bufn++
+
+	gen.writeSym(name)
+
+	gen.encodeLong(int64(l))
+
+	gen.st.push(genStObj, l*2)
+	return nil
+}
+
+// EndObject completes the object currently being generated.
+func (gen *Generator) EndObject() error {
+	if gen.st.sz == 0 || gen.st.cur.typ != genStObj {
+		return errors.New("EndObject() called outside of context of object")
+	}
+	if gen.st.cur.pos != gen.st.cur.cnt {
+		return errors.Errorf("EndObject() called prematurely, %d of %d elems written", gen.st.cur.pos, gen.st.cur.cnt)
 	}
 	gen.st.pop()
 
@@ -375,16 +409,16 @@ func (gen *Generator) checkState(isSym bool, sz int) error {
 		}
 	}
 
-	// If we're presently writing an IVar, then make sure the even numbered elements are Symbols.
-	if gen.st.cur.typ == genStIVar {
-		if gen.st.cur.pos == -1 {
-			// We're gonna be writing the IVar length after this next value during writeAdv.
-			// So, make sure the buffer size will be big enough to accommodate that also.
-			sz += fixnumMaxBytes
-		} else if gen.st.cur.pos&1 == 0 {
-			if !isSym {
-				return ErrNonSymbolValue
-			}
+	if gen.st.cur.typ == genStIVar && gen.st.cur.pos == -1 {
+		// We're gonna be writing the IVar length after this next value during writeAdv.
+		// So, make sure the buffer size will be big enough to accommodate that also.
+		sz += fixnumMaxBytes
+	}
+
+	// If we're presently writing an IVar/object, then make sure the even numbered elements are Symbols.
+	if gen.st.cur.typ == genStIVar || gen.st.cur.typ == genStObj {
+		if gen.st.cur.pos&1 == 0 && !isSym {
+			return ErrNonSymbolValue
 		}
 	}
 
@@ -459,6 +493,7 @@ const (
 	genStArr
 	genStHash
 	genStIVar
+	genStObj
 )
 
 type genStateItem struct {

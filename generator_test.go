@@ -361,3 +361,35 @@ func TestGenIVarInvalidKey(t *testing.T) {
 		t.Fatalf("Unexpected error %+v", err)
 	}
 }
+
+func TestGenObject(t *testing.T) {
+	testGenerator(t, `#Object<:@bar=123 :@foo=test>`, func(gen *rmarsh.Generator) error {
+		if err := gen.StartObject("Object", 2); err != nil {
+			return err
+		}
+		if err := gen.Symbol("@foo"); err != nil {
+			return err
+		}
+		if err := gen.String("test"); err != nil {
+			return err
+		}
+		if err := gen.Symbol("@bar"); err != nil {
+			return err
+		}
+		if err := gen.Fixnum(123); err != nil {
+			return err
+		}
+		return gen.EndObject()
+	})
+}
+
+func TestGenObjectInvalidKey(t *testing.T) {
+	gen := rmarsh.NewGenerator(ioutil.Discard)
+	if err := gen.StartObject("Foo", 1); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := gen.Nil(); err != rmarsh.ErrNonSymbolValue {
+		t.Fatalf("Unexpected error %+v", err)
+	}
+}
