@@ -12,6 +12,7 @@ import (
 
 var ErrGeneratorFinished = fmt.Errorf("Write on finished Marshal stream")
 var ErrGeneratorOverflow = fmt.Errorf("Write past end of bounded array/hash/ivar")
+var ErrNonSymbolValue = fmt.Errorf("Non Symbol value written when Symbol expected.")
 
 const (
 	genStateGrowSize = 8 // Initial size + amount to grow state stack by
@@ -58,7 +59,7 @@ func (gen *Generator) Reset(w io.Writer) {
 
 // Nil writes the nil value to the Marshal stream.
 func (gen *Generator) Nil() error {
-	if err := gen.checkState(1); err != nil {
+	if err := gen.checkState(false, 1); err != nil {
 		return err
 	}
 
@@ -69,7 +70,7 @@ func (gen *Generator) Nil() error {
 
 // Bool writes a true/false value to the Marshal stream.
 func (gen *Generator) Bool(b bool) error {
-	if err := gen.checkState(1); err != nil {
+	if err := gen.checkState(false, 1); err != nil {
 		return err
 	}
 
@@ -93,7 +94,7 @@ func (gen *Generator) Fixnum(n int64) error {
 		return gen.Bignum(&bign)
 	}
 
-	if err := gen.checkState(fixnumMaxBytes + 1); err != nil {
+	if err := gen.checkState(false, fixnumMaxBytes+1); err != nil {
 		return err
 	}
 
@@ -130,7 +131,7 @@ func (gen *Generator) Bignum(b *big.Int) error {
 		sz++
 	}
 
-	if err := gen.checkState(2 + fixnumMaxBytes + sz); err != nil {
+	if err := gen.checkState(false, 2+fixnumMaxBytes+sz); err != nil {
 		return err
 	}
 
@@ -179,7 +180,7 @@ func (gen *Generator) Symbol(sym string) error {
 
 	for i := 0; i < gen.symCount; i++ {
 		if gen.symTbl[i] == sym {
-			if err := gen.checkState(1 + fixnumMaxBytes); err != nil {
+			if err := gen.checkState(true, 1+fixnumMaxBytes); err != nil {
 				return err
 			}
 			gen.buf[gen.bufn] = TYPE_SYMLINK
@@ -191,7 +192,7 @@ func (gen *Generator) Symbol(sym string) error {
 
 	l := len(sym)
 
-	if err := gen.checkState(1 + fixnumMaxBytes + l); err != nil {
+	if err := gen.checkState(true, 1+fixnumMaxBytes+l); err != nil {
 		return err
 	}
 
@@ -212,7 +213,7 @@ func (gen *Generator) Symbol(sym string) error {
 // Be sure to call StartIVar first if you need to include encoding information.
 func (gen *Generator) String(str string) error {
 	l := len(str)
-	if err := gen.checkState(1 + fixnumMaxBytes + l); err != nil {
+	if err := gen.checkState(false, 1+fixnumMaxBytes+l); err != nil {
 		return err
 	}
 
@@ -229,7 +230,7 @@ func (gen *Generator) String(str string) error {
 func (gen *Generator) Float(f float64) error {
 	// String repr of a float64 will never exceed 30 chars.
 	// That also means the len encoded long will never exceed 1 byte.
-	if err := gen.checkState(1 + 1 + 30); err != nil {
+	if err := gen.checkState(false, 1+1+30); err != nil {
 		return err
 	}
 
@@ -251,7 +252,7 @@ func (gen *Generator) Float(f float64) error {
 // StartArray begins writing an array to the Marshal stream.
 // When all elements are written, EndArray() must be called.
 func (gen *Generator) StartArray(l int) error {
-	if err := gen.checkState(1 + fixnumMaxBytes); err != nil {
+	if err := gen.checkState(false, 1+fixnumMaxBytes); err != nil {
 		return err
 	}
 	gen.buf[gen.bufn] = TYPE_ARRAY
@@ -278,7 +279,7 @@ func (gen *Generator) EndArray() error {
 // StartHash behins writing a hash to the Marshal stream.
 // When all elements are written, EndHash() must be called.
 func (gen *Generator) StartHash(l int) error {
-	if err := gen.checkState(1 + fixnumMaxBytes); err != nil {
+	if err := gen.checkState(false, 1+fixnumMaxBytes); err != nil {
 		return err
 	}
 	gen.buf[gen.bufn] = TYPE_HASH
@@ -305,7 +306,7 @@ func (gen *Generator) EndHash() error {
 // Class writes a Ruby class reference to the Marshal stream.
 func (gen *Generator) Class(name string) error {
 	l := len(name)
-	if err := gen.checkState(1 + fixnumMaxBytes + l); err != nil {
+	if err := gen.checkState(false, 1+fixnumMaxBytes+l); err != nil {
 		return err
 	}
 
@@ -321,7 +322,7 @@ func (gen *Generator) Class(name string) error {
 // Module writes a Ruby module reference to the Marshal stream.
 func (gen *Generator) Module(name string) error {
 	l := len(name)
-	if err := gen.checkState(1 + fixnumMaxBytes + l); err != nil {
+	if err := gen.checkState(false, 1+fixnumMaxBytes+l); err != nil {
 		return err
 	}
 
@@ -334,13 +335,56 @@ func (gen *Generator) Module(name string) error {
 	return gen.writeAdv()
 }
 
-func (gen *Generator) checkState(sz int) error {
+// StartIVar begins writing an IVar to the Marshal stream.
+// The next value can be anything that is permitted to have instance variables. The write after that MUST be a Symbol(),
+// and each second write after that must be a symbol until l variables have been written and EndIVar() has been called.
+func (gen *Generator) StartIVar(l int) error {
+	if err := gen.checkState(false, 1+fixnumMaxBytes); err != nil {
+		return err
+	}
+	gen.buf[gen.bufn] = TYPE_IVAR
+	gen.bufn++
+
+	gen.st.push(genStIVar, l*2)
+
+	// We move the current pos on the ivar to -1, since the next write does not count toward the number of instance
+	// vars to be written.
+	gen.st.cur.pos = -1
+	return nil
+}
+
+func (gen *Generator) EndIVar() error {
+	if gen.st.sz == 0 || gen.st.cur.typ != genStIVar {
+		return errors.New("EndIVar() called outside of context of ivar")
+	}
+	if gen.st.cur.pos != gen.st.cur.cnt {
+		return errors.Errorf("EndIVar() called prematurely, %d of %d elems written", gen.st.cur.pos, gen.st.cur.cnt)
+	}
+	gen.st.pop()
+
+	return gen.writeAdv()
+}
+
+func (gen *Generator) checkState(isSym bool, sz int) error {
 	// Make sure we're not writing past bounds.
 	if gen.st.cur.pos == gen.st.cur.cnt {
 		if gen.st.sz == 1 {
 			return ErrGeneratorFinished
 		} else {
 			return ErrGeneratorOverflow
+		}
+	}
+
+	// If we're presently writing an IVar, then make sure the even numbered elements are Symbols.
+	if gen.st.cur.typ == genStIVar {
+		if gen.st.cur.pos == -1 {
+			// We're gonna be writing the IVar length after this next value during writeAdv.
+			// So, make sure the buffer size will be big enough to accommodate that also.
+			sz += fixnumMaxBytes
+		} else if gen.st.cur.pos&1 == 0 {
+			if !isSym {
+				return ErrNonSymbolValue
+			}
 		}
 	}
 
@@ -358,6 +402,12 @@ func (gen *Generator) checkState(sz int) error {
 // Writes the given bytes if provided, then advances current state of the generator.
 func (gen *Generator) writeAdv() error {
 	gen.st.cur.pos++
+
+	if gen.st.cur.typ == genStIVar && gen.st.cur.pos == 0 {
+		// If we just reached pos 0 for the current ivar, it means we wrote the main value and we're about to start
+		// on the instnace vars themselves. We need to write out the instance var count now.
+		gen.encodeLong(int64(gen.st.cur.cnt / 2))
+	}
 
 	// If we've just finished writing out the last value, then we make sure to flush anything remaining.
 	// Otherwise, we let things accumulate in our small buffer between calls to reduce the number of writes.
@@ -408,6 +458,7 @@ const (
 	genStTop = iota
 	genStArr
 	genStHash
+	genStIVar
 )
 
 type genStateItem struct {

@@ -326,3 +326,38 @@ func BenchmarkGenModule(b *testing.B) {
 		}
 	}
 }
+
+func TestGenIVar(t *testing.T) {
+	testGenerator(t, `IVarTest<"bacon">`, func(gen *rmarsh.Generator) error {
+		if err := gen.StartIVar(1); err != nil {
+			return err
+		}
+		if err := gen.StartHash(0); err != nil {
+			return err
+		}
+		if err := gen.EndHash(); err != nil {
+			return err
+		}
+		if err := gen.Symbol("@ivartest"); err != nil {
+			return err
+		}
+		if err := gen.String("bacon"); err != nil {
+			return err
+		}
+		return gen.EndIVar()
+	})
+}
+
+func TestGenIVarInvalidKey(t *testing.T) {
+	gen := rmarsh.NewGenerator(ioutil.Discard)
+	if err := gen.StartIVar(1); err != nil {
+		t.Fatal(err)
+	}
+	if err := gen.Nil(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := gen.Nil(); err != rmarsh.ErrNonSymbolValue {
+		t.Fatalf("Unexpected error %+v", err)
+	}
+}
