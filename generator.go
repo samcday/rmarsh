@@ -399,6 +399,35 @@ func (gen *Generator) EndObject() error {
 	return gen.writeAdv()
 }
 
+// StartUserMarshalled begins writing a user marshalled object with provided class name to the Marshal stream.
+// The next call can be any value type.
+// UserMarshalled object state must be completed with a call to EndUserMarshalled().
+func (gen *Generator) StartUserMarshalled(name string) error {
+	if err := gen.checkState(false, 1+1+fixnumMaxBytes+len(name)); err != nil {
+		return err
+	}
+	gen.buf[gen.bufn] = TYPE_USRMARSHAL
+	gen.bufn++
+
+	gen.writeSym(name)
+
+	gen.st.push(genStUsrMarsh, 1)
+	return nil
+}
+
+// EndUserMarshalled completes the user marshalled object currently being written.
+func (gen *Generator) EndUserMarshalled() error {
+	if gen.st.sz == 0 || gen.st.cur.typ != genStUsrMarsh {
+		return errors.New("EndUserMarshalled() called outside of context of user marshaalled object")
+	}
+	if gen.st.cur.pos != gen.st.cur.cnt {
+		return errors.Errorf("EndUserMarshalled() called prematurely, data value not yet written")
+	}
+	gen.st.pop()
+
+	return gen.writeAdv()
+}
+
 func (gen *Generator) checkState(isSym bool, sz int) error {
 	// Make sure we're not writing past bounds.
 	if gen.st.cur.pos == gen.st.cur.cnt {
@@ -494,6 +523,7 @@ const (
 	genStHash
 	genStIVar
 	genStObj
+	genStUsrMarsh
 )
 
 type genStateItem struct {

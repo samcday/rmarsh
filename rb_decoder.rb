@@ -7,12 +7,12 @@ class Hash
       return "IVarTest<#{@ivartest.inspect}>"
     end
 
-    "{#{keys.sort.map{|k|k.inspect+'=>'+self[k].to_s}.join(', ')}}"
+    "{#{keys.sort.map{|k|k.inspect+'=>'+self[k].inspect}.join(', ')}}"
   end
 end
 class Object
   def inspect
-    "\#Object<#{instance_variables.sort.map{|k|k.inspect+'='+instance_variable_get(k).to_s}.join(' ')}>"
+    "\#Object<#{instance_variables.sort.map{|k|k.inspect+'='+instance_variable_get(k).inspect}.join(' ')}>"
   end
 end
 class Class
@@ -25,7 +25,14 @@ class Module
     "Module<#{name}>"
   end
 end
-
+class UsrMarsh
+  def marshal_load data
+    @data = data
+  end
+  def inspect
+    "UsrMarsh<#{@data.inspect}>"
+  end
+end
 $stdout.sync = true
 
 begin

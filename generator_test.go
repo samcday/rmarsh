@@ -363,7 +363,7 @@ func TestGenIVarInvalidKey(t *testing.T) {
 }
 
 func TestGenObject(t *testing.T) {
-	testGenerator(t, `#Object<:@bar=123 :@foo=test>`, func(gen *rmarsh.Generator) error {
+	testGenerator(t, `#Object<:@bar=123 :@foo="test">`, func(gen *rmarsh.Generator) error {
 		if err := gen.StartObject("Object", 2); err != nil {
 			return err
 		}
@@ -392,4 +392,31 @@ func TestGenObjectInvalidKey(t *testing.T) {
 	if err := gen.Nil(); err != rmarsh.ErrNonSymbolValue {
 		t.Fatalf("Unexpected error %+v", err)
 	}
+}
+
+func TestGenUserMarshalled(t *testing.T) {
+	testGenerator(t, `UsrMarsh<[{:foo=>"bar"}]>`, func(gen *rmarsh.Generator) error {
+		if err := gen.StartUserMarshalled("UsrMarsh"); err != nil {
+			return err
+		}
+		if err := gen.StartArray(1); err != nil {
+			return err
+		}
+		if err := gen.StartHash(1); err != nil {
+			return err
+		}
+		if err := gen.Symbol("foo"); err != nil {
+			return err
+		}
+		if err := gen.String("bar"); err != nil {
+			return err
+		}
+		if err := gen.EndHash(); err != nil {
+			return err
+		}
+		if err := gen.EndArray(); err != nil {
+			return err
+		}
+		return gen.EndUserMarshalled()
+	})
 }

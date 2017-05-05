@@ -178,5 +178,5 @@ type encodeStruct struct {
 }
 
 func TestEncodeStruct(t *testing.T) {
-	testRubyDecode(t, &encodeStruct{Foo: "test"}, `{:quux=>test}`)
+	testRubyDecode(t, &encodeStruct{Foo: "test"}, `{:quux=>"test"}`)
 }
