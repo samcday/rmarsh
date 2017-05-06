@@ -400,6 +400,7 @@ func (gen *Generator) EndObject() error {
 }
 
 // StartUserMarshalled begins writing a user marshalled object with provided class name to the Marshal stream.
+// User marshalled objects are Ruby objects that have a marshal_load function.
 // The next call can be any value type.
 // UserMarshalled object state must be completed with a call to EndUserMarshalled().
 func (gen *Generator) StartUserMarshalled(name string) error {
@@ -424,6 +425,25 @@ func (gen *Generator) EndUserMarshalled() error {
 		return errors.Errorf("EndUserMarshalled() called prematurely, data value not yet written")
 	}
 	gen.st.pop()
+
+	return gen.writeAdv()
+}
+
+// UsrDef writes a user defined object with the given name and data string to the Marshal stream.
+// User defined objects are Ruby objects that have a _load function that accepts a string and construct the object.
+// If you need to specify encoding on the data string, open an IVar context with StartIVar before calling this method.
+func (gen *Generator) UserDefinedObject(name, data string) error {
+	if err := gen.checkState(false, 1+fixnumMaxBytes+len(name)+fixnumMaxBytes+len(data)); err != nil {
+		return err
+	}
+	gen.buf[gen.bufn] = TYPE_USRDEF
+	gen.bufn++
+
+	gen.writeSym(name)
+
+	gen.encodeLong(int64(len(data)))
+	copy(gen.buf[gen.bufn:], data)
+	gen.bufn += len(data)
 
 	return gen.writeAdv()
 }

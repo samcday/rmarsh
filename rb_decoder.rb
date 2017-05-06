@@ -33,6 +33,17 @@ class UsrMarsh
     "UsrMarsh<#{@data.inspect}>"
   end
 end
+class UsrDef
+  def initialize data
+    @data = data
+  end
+  def self._load data
+    UsrDef.new(data)
+  end
+  def inspect
+    "UsrDef<#{@data.inspect}>"
+  end
+end
 $stdout.sync = true
 
 begin

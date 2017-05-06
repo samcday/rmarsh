@@ -420,3 +420,9 @@ func TestGenUserMarshalled(t *testing.T) {
 		return gen.EndUserMarshalled()
 	})
 }
+
+func TestGenUserDefined(t *testing.T) {
+	testGenerator(t, `UsrDef<"test">`, func(gen *rmarsh.Generator) error {
+		return gen.UserDefinedObject("UsrDef", "test")
+	})
+}
