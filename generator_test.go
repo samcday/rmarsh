@@ -348,6 +348,30 @@ func TestGenIVar(t *testing.T) {
 	})
 }
 
+func BenchmarkGenIVar(b *testing.B) {
+	gen := rmarsh.NewGenerator(ioutil.Discard)
+
+	for i := 0; i < b.N; i++ {
+		gen.Reset(nil)
+
+		if err := gen.StartIVar(1); err != nil {
+			b.Fatal(err)
+		}
+		if err := gen.String("test"); err != nil {
+			b.Fatal(err)
+		}
+		if err := gen.Symbol("E"); err != nil {
+			b.Fatal(err)
+		}
+		if err := gen.Bool(true); err != nil {
+			b.Fatal(err)
+		}
+		if err := gen.EndIVar(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func TestGenIVarInvalidKey(t *testing.T) {
 	gen := rmarsh.NewGenerator(ioutil.Discard)
 	if err := gen.StartIVar(1); err != nil {
@@ -424,5 +448,23 @@ func TestGenUserMarshalled(t *testing.T) {
 func TestGenUserDefined(t *testing.T) {
 	testGenerator(t, `UsrDef<"test">`, func(gen *rmarsh.Generator) error {
 		return gen.UserDefinedObject("UsrDef", "test")
+	})
+}
+
+func BenchmarkGenUserDefined(b *testing.B) {
+	gen := rmarsh.NewGenerator(ioutil.Discard)
+
+	for i := 0; i < b.N; i++ {
+		gen.Reset(nil)
+
+		if err := gen.UserDefinedObject("UsrDef", "test"); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func TestGenRegexp(t *testing.T) {
+	testGenerator(t, `/test/i`, func(gen *rmarsh.Generator) error {
+		return gen.Regexp("test", rmarsh.REGEXP_IGNORECASE)
 	})
 }

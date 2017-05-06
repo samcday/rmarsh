@@ -210,6 +210,14 @@ func (gen *Generator) Symbol(sym string) error {
 	return gen.writeAdv()
 }
 
+// Writes given string to stream but does not check state or advance it.
+func (gen *Generator) writeString(str string) {
+	l := len(str)
+	gen.encodeLong(int64(l))
+	copy(gen.buf[gen.bufn:], str)
+	gen.bufn += l
+}
+
 // String writes the given string to the Marshal stream.
 // Be sure to call StartIVar first if you need to include encoding information.
 func (gen *Generator) String(str string) error {
@@ -220,9 +228,7 @@ func (gen *Generator) String(str string) error {
 
 	gen.buf[gen.bufn] = TYPE_STRING
 	gen.bufn++
-	gen.encodeLong(int64(l))
-	copy(gen.buf[gen.bufn:], str)
-	gen.bufn += l
+	gen.writeString(str)
 
 	return gen.writeAdv()
 }
@@ -444,6 +450,23 @@ func (gen *Generator) UserDefinedObject(name, data string) error {
 	gen.encodeLong(int64(len(data)))
 	copy(gen.buf[gen.bufn:], data)
 	gen.bufn += len(data)
+
+	return gen.writeAdv()
+}
+
+// Regexp writes regular expression with given text + flags to the Marshal stream.
+// Look at REGEXP_* flags for valid ones.
+// To set encoding on the regexp obj, wrap it in an IVar.
+func (gen *Generator) Regexp(expr string, flags byte) error {
+	if err := gen.checkState(false, 1+fixnumMaxBytes+len(expr)+1); err != nil {
+		return err
+	}
+
+	gen.buf[gen.bufn] = TYPE_REGEXP
+	gen.bufn++
+	gen.writeString(expr)
+	gen.buf[gen.bufn] = flags
+	gen.bufn++
 
 	return gen.writeAdv()
 }
