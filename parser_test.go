@@ -169,13 +169,13 @@ func BenchmarkParserFloat(b *testing.B) {
 	}
 }
 
-func TestParserBigNum(t *testing.T) {
+func TestParserBignum(t *testing.T) {
 	p := parseFromRuby(t, "-0xDEADCAFEBEEF")
-	expectToken(t, p, rmarsh.TokenBigNum)
-	if n, err := p.BigNum(); err != nil {
-		t.Errorf("p.BigNum() err %s", err)
+	expectToken(t, p, rmarsh.TokenBignum)
+	if n, err := p.Bignum(); err != nil {
+		t.Errorf("p.Bignum() err %s", err)
 	} else if str := n.Text(16); str != "-deadcafebeef" {
-		t.Errorf("p.BigNum() = %s, expected -deadcafebeef", str)
+		t.Errorf("p.Bignum() = %s, expected -deadcafebeef", str)
 	}
 	expectToken(t, p, rmarsh.TokenEOF)
 
@@ -186,17 +186,17 @@ func TestParserBigNum(t *testing.T) {
 	}
 }
 
-func BenchmarkParserBigNum(b *testing.B) {
+func BenchmarkParserBignum(b *testing.B) {
 	buf := newCyclicReader(rbEncode(b, "0xDEADCAFEBEEF"))
 	p := rmarsh.NewParser(buf)
 
 	for i := 0; i < b.N; i++ {
 		p.Reset()
 
-		if tok, err := p.Next(); err != nil || tok != rmarsh.TokenBigNum {
+		if tok, err := p.Next(); err != nil || tok != rmarsh.TokenBignum {
 			b.Fatalf("%v %v", tok, err)
 		}
-		if _, err := p.BigNum(); err != nil {
+		if _, err := p.Bignum(); err != nil {
 			b.Fatal(err)
 		}
 	}

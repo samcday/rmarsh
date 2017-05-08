@@ -24,7 +24,7 @@ const (
 	TokenFalse
 	TokenFixnum
 	TokenFloat
-	TokenBigNum
+	TokenBignum
 	TokenSymbol
 	TokenString
 	TokenStartArray
@@ -42,7 +42,7 @@ var tokenNames = map[Token]string{
 	TokenFalse:      "TokenFalse",
 	TokenFixnum:     "TokenFixnum",
 	TokenFloat:      "TokenFloat",
-	TokenBigNum:     "TokenBigNum",
+	TokenBignum:     "TokenBignum",
 	TokenSymbol:     "TokenSymbol",
 	TokenString:     "TokenString",
 	TokenStartArray: "TokenStartArray",
@@ -86,8 +86,9 @@ type Parser struct {
 	buf []byte
 	ctx []byte
 
-	num      int64
-	bnum     *big.Int
+	num int64
+
+	bnumbits []big.Word
 	bnumsign byte
 
 	symCount int
@@ -181,22 +182,43 @@ func (p *Parser) Float() (float64, error) {
 	return flt, nil
 }
 
-// BigNum returns the value contained in the current BigNum token.
+// Bignum returns the value contained in the current Bignum token.
+// Converting the current context into a big.Int is expensive, be  sure to only call this once for each distinct value.
 // Returns an error if called for any other type of token.
-func (p *Parser) BigNum() (*big.Int, error) {
-	if p.cur != TokenBigNum {
-		return nil, errors.Errorf("rmarsh.Parser.BigNum() called for wrong token: %s", p.cur)
+func (p *Parser) Bignum() (big.Int, error) {
+	if p.cur != TokenBignum {
+		return big.Int{}, errors.Errorf("rmarsh.Parser.Bignum() called for wrong token: %s", p.cur)
 	}
-	if p.bnum == nil {
-		b := make([]byte, len(p.ctx))
-		copy(b, p.ctx)
-		reverseBytes(b)
-		p.bnum = new(big.Int).SetBytes(b)
-		if p.bnumsign == '-' {
-			p.bnum = p.bnum.Neg(p.bnum)
+
+	wordsz := (len(p.ctx) + _S - 1) / _S
+	if len(p.bnumbits) < wordsz {
+		p.bnumbits = make([]big.Word, wordsz)
+	}
+
+	k := 0
+	s := uint(0)
+	var d big.Word
+
+	for i := 0; i < len(p.ctx); i++ {
+		d |= big.Word(p.ctx[i]) << s
+		if s += 8; s == _S*8 {
+			p.bnumbits[k] = d
+			k++
+			s = 0
+			d = 0
 		}
 	}
-	return p.bnum, nil
+	if k < wordsz {
+		p.bnumbits[k] = d
+	}
+
+	var bnum big.Int
+	bnum.SetBits(p.bnumbits[:wordsz])
+
+	if p.bnumsign == '-' {
+		bnum = *bnum.Neg(&bnum)
+	}
+	return bnum, nil
 }
 
 // Bytes returns the raw bytes for the current token.
@@ -221,7 +243,7 @@ func (p *Parser) IVarName() (string, error) {
 // Errors if the token is not one of Float, Bignum, Symbol or String
 func (p *Parser) Text() (string, error) {
 	switch p.cur {
-	case TokenBigNum:
+	case TokenBignum:
 		return string(p.bnumsign) + string(p.ctx), nil
 	case TokenFloat, TokenSymbol, TokenString:
 		return string(p.ctx), nil
@@ -272,8 +294,7 @@ func (p *Parser) adv() (err error) {
 			return errors.Wrap(err, "float")
 		}
 	case TYPE_BIGNUM:
-		p.cur = TokenBigNum
-		p.bnum = nil
+		p.cur = TokenBignum
 		p.bnumsign, err = p.readbyte()
 		if err != nil {
 			return errors.Wrap(err, "bignum")
