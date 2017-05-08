@@ -44,6 +44,13 @@ class UsrDef
     "UsrDef<#{@data.inspect}>"
   end
 end
+
+TestStruct = Struct.new(:test) do
+  def inspect
+    "TestStruct<#{test.inspect}>"
+  end
+end
+
 $stdout.sync = true
 
 begin

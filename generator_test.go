@@ -468,3 +468,39 @@ func TestGenRegexp(t *testing.T) {
 		return gen.Regexp("test", rmarsh.REGEXP_IGNORECASE)
 	})
 }
+
+func TestGenStruct(t *testing.T) {
+	testGenerator(t, `TestStruct<"test">`, func(gen *rmarsh.Generator) error {
+		if err := gen.StartStruct("TestStruct", 1); err != nil {
+			return err
+		}
+		if err := gen.Symbol("test"); err != nil {
+			return err
+		}
+		if err := gen.String("test"); err != nil {
+			return err
+		}
+		return gen.EndStruct()
+	})
+}
+
+func BenchmarkGenStruct(b *testing.B) {
+	gen := rmarsh.NewGenerator(ioutil.Discard)
+
+	for i := 0; i < b.N; i++ {
+		gen.Reset(nil)
+
+		if err := gen.StartStruct("TestStruct", 1); err != nil {
+			b.Fatal(err)
+		}
+		if err := gen.Symbol("Test"); err != nil {
+			b.Fatal(err)
+		}
+		if err := gen.Bool(true); err != nil {
+			b.Fatal(err)
+		}
+		if err := gen.EndStruct(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

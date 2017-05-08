@@ -471,6 +471,36 @@ func (gen *Generator) Regexp(expr string, flags byte) error {
 	return gen.writeAdv()
 }
 
+// StartStruct begins writing a struct value to the Marshal stream.
+// l pairs of Symbol + values must be written after this call, and then punctuated with a call to EndStruct
+func (gen *Generator) StartStruct(name string, l int) error {
+	if err := gen.checkState(false, 1+1+fixnumMaxBytes+len(name)+fixnumMaxBytes); err != nil {
+		return err
+	}
+	gen.buf[gen.bufn] = TYPE_STRUCT
+	gen.bufn++
+
+	gen.writeSym(name)
+
+	gen.encodeLong(int64(l))
+
+	gen.st.push(genStStruct, l*2)
+	return nil
+}
+
+// EndStruct completes the struct currently being generated.
+func (gen *Generator) EndStruct() error {
+	if gen.st.sz == 0 || gen.st.cur.typ != genStStruct {
+		return errors.New("EndStruct() called outside of context of struct")
+	}
+	if gen.st.cur.pos != gen.st.cur.cnt {
+		return errors.Errorf("EndStruct() called prematurely, %d of %d elems written", gen.st.cur.pos, gen.st.cur.cnt)
+	}
+	gen.st.pop()
+
+	return gen.writeAdv()
+}
+
 func (gen *Generator) checkState(isSym bool, sz int) error {
 	// Make sure we're not writing past bounds.
 	if gen.st.cur.pos == gen.st.cur.cnt {
@@ -488,7 +518,7 @@ func (gen *Generator) checkState(isSym bool, sz int) error {
 	}
 
 	// If we're presently writing an IVar/object, then make sure the even numbered elements are Symbols.
-	if gen.st.cur.typ == genStIVar || gen.st.cur.typ == genStObj {
+	if gen.st.cur.typ == genStIVar || gen.st.cur.typ == genStObj || gen.st.cur.typ == genStStruct {
 		if gen.st.cur.pos&1 == 0 && !isSym {
 			return ErrNonSymbolValue
 		}
@@ -567,6 +597,7 @@ const (
 	genStIVar
 	genStObj
 	genStUsrMarsh
+	genStStruct
 )
 
 type genStateItem struct {
