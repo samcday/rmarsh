@@ -87,7 +87,6 @@ type Parser struct {
 	ctx []byte
 
 	num      int64
-	flt      *float64
 	bnum     *big.Int
 	bnumsign byte
 
@@ -169,19 +168,17 @@ func (p *Parser) Int() (int64, error) {
 }
 
 // Float returns the value contained in the current Float token.
+// Converting the current context into a float is expensive, be  sure to only call this once for each distinct value.
 // Returns an error if called for any other type of token.
 func (p *Parser) Float() (float64, error) {
 	if p.cur != TokenFloat {
 		return 0, errors.Errorf("rmarsh.Parser.Float() called for wrong token: %s", p.cur)
 	}
-	if p.flt == nil {
-		if flt, err := strconv.ParseFloat(string(p.ctx), 64); err != nil {
-			return 0, errors.Wrap(err, "rmarsh.Parser.Float()")
-		} else {
-			p.flt = &flt
-		}
+	flt, err := strconv.ParseFloat(string(p.ctx), 64)
+	if err != nil {
+		return 0, errors.Wrap(err, "rmarsh.Parser.Float()")
 	}
-	return *p.flt, nil
+	return flt, nil
 }
 
 // BigNum returns the value contained in the current BigNum token.
@@ -271,10 +268,6 @@ func (p *Parser) adv() (err error) {
 		}
 	case TYPE_FLOAT:
 		p.cur = TokenFloat
-		// Float() caches the result of strconv.ParseFloat, since it's pretty expensive.
-		// We clear out any previously cached value if we've parsed a float earlier in
-		// the stream.
-		p.flt = nil
 		if err := p.sizedBlob(false); err != nil {
 			return errors.Wrap(err, "float")
 		}
