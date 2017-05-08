@@ -97,7 +97,9 @@ func BenchmarkParserBool(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		p.Reset()
 
-		p.Next()
+		if tok, err := p.Next(); err != nil || tok != rmarsh.TokenTrue {
+			b.Fatalf("%v %v", tok, err)
+		}
 	}
 }
 
@@ -125,8 +127,12 @@ func BenchmarkParserFixnum(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		p.Reset()
 
-		p.Next()
-		p.Int()
+		if tok, err := p.Next(); err != nil || tok != rmarsh.TokenFixnum {
+			b.Fatalf("%v %v", tok, err)
+		}
+		if n, err := p.Int(); err != nil || n != 0xBEEF {
+			b.Fatalf("%v %v", n, err)
+		}
 	}
 }
 
@@ -154,8 +160,12 @@ func BenchmarkParserFloat(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		p.Reset()
 
-		p.Next()
-		p.Float()
+		if tok, err := p.Next(); err != nil || tok != rmarsh.TokenFloat {
+			b.Fatalf("%v %v", tok, err)
+		}
+		if f, err := p.Float(); err != nil || f != 123.321 {
+			b.Fatalf("%v %v", f, err)
+		}
 	}
 }
 
@@ -183,8 +193,12 @@ func BenchmarkParserBigNum(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		p.Reset()
 
-		p.Next()
-		p.BigNum()
+		if tok, err := p.Next(); err != nil || tok != rmarsh.TokenBigNum {
+			b.Fatalf("%v %v", tok, err)
+		}
+		if _, err := p.BigNum(); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -206,8 +220,12 @@ func BenchmarkParserSymbol(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		p.Reset()
 
-		p.Next()
-		p.Text()
+		if tok, err := p.Next(); err != nil || tok != rmarsh.TokenSymbol {
+			b.Fatalf("%v %v", tok, err)
+		}
+		if sym, err := p.Text(); err != nil || sym != "test" {
+			b.Fatalf("%v %v", sym, err)
+		}
 	}
 }
 
@@ -230,8 +248,12 @@ func BenchmarkParserString(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		p.Reset()
 
-		p.Next()
-		p.Text()
+		if tok, err := p.Next(); err != nil || tok != rmarsh.TokenString {
+			b.Fatalf("%v %v", tok, err)
+		}
+		if sym, err := p.Text(); err != nil || sym != "test" {
+			b.Fatalf("%v %v", sym, err)
+		}
 	}
 }
 
@@ -242,15 +264,19 @@ func TestParserEmptyArray(t *testing.T) {
 	expectToken(t, p, rmarsh.TokenEOF)
 }
 
-func BenchmarkEmptyArray(b *testing.B) {
+func BenchmarkParserEmptyArray(b *testing.B) {
 	buf := newCyclicReader(rbEncode(b, "[]"))
 	p := rmarsh.NewParser(buf)
 
 	for i := 0; i < b.N; i++ {
 		p.Reset()
 
-		p.Next()
-		p.Next()
+		if tok, err := p.Next(); err != nil || tok != rmarsh.TokenStartArray {
+			b.Fatalf("%v %v", tok, err)
+		}
+		if tok, err := p.Next(); err != nil || tok != rmarsh.TokenEndArray {
+			b.Fatalf("%v %v", tok, err)
+		}
 	}
 }
 
