@@ -26,6 +26,39 @@ func expectToken(t testing.TB, p *rmarsh.Parser, exp rmarsh.Token) {
 	}
 }
 
+type cyclicReader struct {
+	b   []byte
+	off int
+	sz  int
+}
+
+func (r *cyclicReader) Read(b []byte) (int, error) {
+	n := copy(b, r.b[r.off:])
+	r.off += n
+	if r.off >= r.sz {
+		r.off = 0
+	}
+	return n, nil
+}
+
+func newCyclicReader(b []byte) *cyclicReader {
+	return &cyclicReader{
+		b:   b,
+		off: 0,
+		sz:  len(b),
+	}
+}
+
+func BenchmarkParserReset(b *testing.B) {
+	raw := rbEncode(b, "nil")
+	buf := newCyclicReader(raw)
+	p := rmarsh.NewParser(buf)
+
+	for i := 0; i < b.N; i++ {
+		p.Reset()
+	}
+}
+
 func TestParserNil(t *testing.T) {
 	p := parseFromRuby(t, "nil")
 	expectToken(t, p, rmarsh.TokenNil)
@@ -35,15 +68,15 @@ func TestParserNil(t *testing.T) {
 }
 
 func BenchmarkParserNil(b *testing.B) {
-	raw := rbEncode(b, "nil")
-	buf := bytes.NewReader(raw)
+	buf := newCyclicReader(rbEncode(b, "nil"))
 	p := rmarsh.NewParser(buf)
 
 	for i := 0; i < b.N; i++ {
-		buf.Reset(raw)
 		p.Reset()
 
-		p.Next()
+		if tok, err := p.Next(); err != nil || tok != rmarsh.TokenNil {
+			b.Fatalf("%v %v", tok, err)
+		}
 	}
 }
 
@@ -58,12 +91,10 @@ func TestParserBool(t *testing.T) {
 }
 
 func BenchmarkParserBool(b *testing.B) {
-	raw := rbEncode(b, "true")
-	buf := bytes.NewReader(raw)
+	buf := newCyclicReader(rbEncode(b, "true"))
 	p := rmarsh.NewParser(buf)
 
 	for i := 0; i < b.N; i++ {
-		buf.Reset(raw)
 		p.Reset()
 
 		p.Next()
@@ -88,12 +119,10 @@ func TestParserFixnum(t *testing.T) {
 }
 
 func BenchmarkParserFixnum(b *testing.B) {
-	raw := rbEncode(b, "0xBEEF")
-	buf := bytes.NewReader(raw)
+	buf := newCyclicReader(rbEncode(b, "0xBEEF"))
 	p := rmarsh.NewParser(buf)
 
 	for i := 0; i < b.N; i++ {
-		buf.Reset(raw)
 		p.Reset()
 
 		p.Next()
@@ -119,12 +148,10 @@ func TestParserFloat(t *testing.T) {
 }
 
 func BenchmarkParserFloat(b *testing.B) {
-	raw := rbEncode(b, "123.321")
-	buf := bytes.NewReader(raw)
+	buf := newCyclicReader(rbEncode(b, "123.321"))
 	p := rmarsh.NewParser(buf)
 
 	for i := 0; i < b.N; i++ {
-		buf.Reset(raw)
 		p.Reset()
 
 		p.Next()
@@ -150,12 +177,10 @@ func TestParserBigNum(t *testing.T) {
 }
 
 func BenchmarkParserBigNum(b *testing.B) {
-	raw := rbEncode(b, "0xDEADCAFEBEEF")
-	buf := bytes.NewReader(raw)
+	buf := newCyclicReader(rbEncode(b, "0xDEADCAFEBEEF"))
 	p := rmarsh.NewParser(buf)
 
 	for i := 0; i < b.N; i++ {
-		buf.Reset(raw)
 		p.Reset()
 
 		p.Next()
@@ -175,12 +200,10 @@ func TestParserSymbol(t *testing.T) {
 }
 
 func BenchmarkParserSymbol(b *testing.B) {
-	raw := rbEncode(b, ":test")
-	buf := bytes.NewReader(raw)
+	buf := newCyclicReader(rbEncode(b, ":test"))
 	p := rmarsh.NewParser(buf)
 
 	for i := 0; i < b.N; i++ {
-		buf.Reset(raw)
 		p.Reset()
 
 		p.Next()
@@ -201,12 +224,10 @@ func TestParserString(t *testing.T) {
 }
 
 func BenchmarkParserString(b *testing.B) {
-	raw := rbEncode(b, "[116,101,115,116].pack('c*')")
-	buf := bytes.NewReader(raw)
+	buf := newCyclicReader(rbEncode(b, "[116,101,115,116].pack('c*')"))
 	p := rmarsh.NewParser(buf)
 
 	for i := 0; i < b.N; i++ {
-		buf.Reset(raw)
 		p.Reset()
 
 		p.Next()
@@ -222,12 +243,10 @@ func TestParserEmptyArray(t *testing.T) {
 }
 
 func BenchmarkEmptyArray(b *testing.B) {
-	raw := rbEncode(b, "[]")
-	buf := bytes.NewReader(raw)
+	buf := newCyclicReader(rbEncode(b, "[]"))
 	p := rmarsh.NewParser(buf)
 
 	for i := 0; i < b.N; i++ {
-		buf.Reset(raw)
 		p.Reset()
 
 		p.Next()
