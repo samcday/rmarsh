@@ -16,6 +16,7 @@ var ErrNonSymbolValue = fmt.Errorf("Non Symbol value written when Symbol expecte
 
 const (
 	genStateGrowSize = 8 // Initial size + amount to grow state stack by
+	symTblGrowSize   = 8
 )
 
 type Generator struct {

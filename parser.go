@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	bufSize        = 64 // Initial size of our read buffer
-	symTblGrowSize = 8  // Amount to grow Symbol table by when needed
-	stackGrowSize  = 8  // Amount to grow stack by when needed
+	bufSize        = 64   // Initial size of our read buffer
+	symTblInitSize = 32   // Initial size of symbol table
+	symTblMaxInc   = 1024 // Symbol table is doubled in size whenever space is exceeded, increment is capped at this num.
+	stackGrowSize  = 8    // Amount to grow stack by when needed
 )
 
 type Token uint8
@@ -93,8 +94,7 @@ type Parser struct {
 	bnumbits []big.Word
 	bnumsign byte
 
-	symCount int
-	symTbl   [][]byte
+	symTbl symTable
 }
 
 // NewParser constructs a new parser that streams data from the given io.Reader
@@ -102,14 +102,16 @@ type Parser struct {
 // please ensure that the provided Reader is buffered, or wrap it in a bufio.Reader.
 func NewParser(r io.Reader) *Parser {
 	p := &Parser{r: r, buf: make([]byte, bufSize)}
+	p.symTbl.off = make([]int, 8)
+	p.symTbl.sz = make([]int, 8)
 	return p
 }
 
 func (p *Parser) Reset() {
 	p.pos = 0
 	p.cur = tokenStart
-	p.symCount = 0
 	p.stSz = 0
+	p.symTbl.reset()
 }
 
 // Next advances the parser to the next token in the stream.
@@ -315,16 +317,7 @@ func (p *Parser) adv() (err error) {
 		if err := p.sizedBlob(false); err != nil {
 			return errors.Wrap(err, "symbol")
 		}
-		// Unfortunately, we have to take a copy of the ctx into the symbol cache here
-		// Since this symbol might be referenced by a symlink later.
-		if l := len(p.symTbl); p.symCount == l {
-			newTbl := make([][]byte, l+symTblGrowSize)
-			copy(newTbl, p.symTbl)
-			p.symTbl = newTbl
-		}
-		p.symTbl[p.symCount] = make([]byte, len(p.ctx))
-		copy(p.symTbl[p.symCount], p.ctx)
-		p.symCount++
+		p.symTbl.add(p.ctx)
 	case TYPE_STRING:
 		p.cur = TokenString
 		if err := p.sizedBlob(false); err != nil {
@@ -337,10 +330,10 @@ func (p *Parser) adv() (err error) {
 			return errors.Wrap(err, "symlink id")
 		}
 		id := int(n)
-		if id >= p.symCount {
-			return errors.Errorf("Symlink id %d is larger than max known %d", id, p.symCount-1)
+		if id >= p.symTbl.num {
+			return errors.Errorf("Symlink id %d is larger than max known %d", id, p.symTbl.num-1)
 		}
-		p.ctx = p.symTbl[id]
+		p.ctx = p.symTbl.get(id)
 	case TYPE_ARRAY:
 		p.cur = TokenStartArray
 		n, err := p.long()
@@ -494,4 +487,53 @@ func (p *Parser) readbytes(num uint64) ([]byte, error) {
 	}
 	p.pos += num
 	return b, nil
+}
+
+// Stores symbols in a single dimension byte array with lookups for offset+lengths.
+// Reduces amount of on-heap allocations.
+type symTable struct {
+	data []byte
+	off  []int
+	sz   []int
+	num  int
+	pos  int
+}
+
+func (t *symTable) get(id int) []byte {
+	return t.data[t.off[id] : t.off[id]+t.sz[id]]
+}
+
+func (t *symTable) add(sym []byte) {
+	if len(t.off) == t.num {
+		newOff := make([]int, len(t.off)*2)
+		copy(newOff, t.off)
+		t.off = newOff
+		newSz := make([]int, len(t.off)*2)
+		copy(newSz, t.sz)
+		t.sz = newSz
+	}
+
+	if t.pos+len(sym) < len(t.data) {
+		incr := len(t.data)
+		if incr > symTblMaxInc {
+			incr = symTblMaxInc
+		}
+		if incr < len(sym) {
+			incr = len(sym)
+		}
+		newData := make([]byte, len(t.data)+incr)
+		copy(newData, t.data)
+		t.data = newData
+	}
+
+	n := copy(t.data[t.pos:], sym)
+	t.off[t.num] = t.pos
+	t.sz[t.num] = n
+	t.pos += n
+	t.num++
+}
+
+func (t *symTable) reset() {
+	t.num = 0
+	t.pos = 0
 }
