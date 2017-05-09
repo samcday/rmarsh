@@ -4,7 +4,9 @@ import (
 	"encoding/binary"
 	"io"
 	"math/big"
+	"reflect"
 	"strconv"
+	"unsafe"
 
 	"github.com/pkg/errors"
 )
@@ -175,7 +177,12 @@ func (p *Parser) Float() (float64, error) {
 	if p.cur != TokenFloat {
 		return 0, errors.Errorf("rmarsh.Parser.Float() called for wrong token: %s", p.cur)
 	}
-	flt, err := strconv.ParseFloat(string(p.ctx), 64)
+
+	bytesHeader := (*reflect.SliceHeader)(unsafe.Pointer(&p.ctx))
+	strHeader := reflect.StringHeader{bytesHeader.Data, bytesHeader.Len}
+	str := *(*string)(unsafe.Pointer(&strHeader))
+
+	flt, err := strconv.ParseFloat(str, 64)
 	if err != nil {
 		return 0, errors.Wrap(err, "rmarsh.Parser.Float()")
 	}
