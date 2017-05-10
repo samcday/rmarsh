@@ -216,6 +216,7 @@ func TestParserSymbol(t *testing.T) {
 func BenchmarkParserSymbol(b *testing.B) {
 	buf := newCyclicReader(rbEncode(b, ":test"))
 	p := rmarsh.NewParser(buf)
+	exp := []byte("test")
 
 	for i := 0; i < b.N; i++ {
 		p.Reset()
@@ -223,8 +224,8 @@ func BenchmarkParserSymbol(b *testing.B) {
 		if tok, err := p.Next(); err != nil || tok != rmarsh.TokenSymbol {
 			b.Fatalf("%v %v", tok, err)
 		}
-		if sym, err := p.Text(); err != nil || sym != "test" {
-			b.Fatalf("%v %v", sym, err)
+		if !bytes.Equal(p.Bytes(), exp) {
+			b.Fatalf("%s != test", p.Bytes())
 		}
 	}
 }
@@ -244,6 +245,7 @@ func TestParserString(t *testing.T) {
 func BenchmarkParserString(b *testing.B) {
 	buf := newCyclicReader(rbEncode(b, "[116,101,115,116].pack('c*')"))
 	p := rmarsh.NewParser(buf)
+	exp := []byte("test")
 
 	for i := 0; i < b.N; i++ {
 		p.Reset()
@@ -251,8 +253,8 @@ func BenchmarkParserString(b *testing.B) {
 		if tok, err := p.Next(); err != nil || tok != rmarsh.TokenString {
 			b.Fatalf("%v %v", tok, err)
 		}
-		if sym, err := p.Text(); err != nil || sym != "test" {
-			b.Fatalf("%v %v", sym, err)
+		if !bytes.Equal(p.Bytes(), exp) {
+			b.Fatalf("%s != test", p.Bytes())
 		}
 	}
 }
