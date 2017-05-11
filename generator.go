@@ -36,6 +36,7 @@ func NewGenerator(w io.Writer) *Generator {
 		w:   w,
 		buf: make([]byte, 128),
 	}
+	gen.st.stack = make([]genStateItem, genStateGrowSize)
 	gen.Reset(nil)
 	return gen
 }
@@ -615,6 +616,7 @@ func (st *genStateItem) reset(sz int, typ uint8) {
 
 type genState struct {
 	stack []genStateItem
+	cap   int
 	sz    int
 	cur   *genStateItem
 }
@@ -622,21 +624,22 @@ type genState struct {
 // Resets generator state back to initial state (which is ready for a new
 // top level value to be written)
 func (st *genState) reset() {
-	st.sz = 0
-	st.push(genStTop, 1)
+	st.sz = 1
+	st.cur = &st.stack[0]
+	st.cur.cnt = 1
+	st.cur.pos = 0
+	st.cur.typ = genStTop
 }
 
 func (st *genState) push(typ uint8, cnt int) {
 	if st.sz == len(st.stack) {
-		newSt := make([]genStateItem, st.sz+genStateGrowSize)
+		newSt := make([]genStateItem, len(st.stack)+genStateGrowSize)
 		copy(newSt, st.stack)
 		st.stack = newSt
 	}
 
-	st.stack[st.sz].typ = typ
-	st.stack[st.sz].cnt = cnt
-	st.stack[st.sz].pos = 0
 	st.cur = &st.stack[st.sz]
+	st.cur.reset(cnt, typ)
 	st.sz++
 }
 
