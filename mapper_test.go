@@ -65,6 +65,13 @@ func TestMapperReadValueBool(t *testing.T) {
 	if *ptr != true {
 		t.Errorf("%v != true", ptr)
 	}
+
+	var silly *****bool
+	testMapperReadValue(t, "true", &silly)
+
+	if *****silly != true {
+		t.Errorf("%v != true", silly)
+	}
 }
 
 func BenchmarkMapperReadTrue(b *testing.B) {
@@ -82,6 +89,39 @@ func BenchmarkMapperReadTrue(b *testing.B) {
 			b.Fatal(err)
 		} else if v != true {
 			b.Fatalf("%v != true", v)
+		}
+	}
+}
+
+func TestMapperReadValueInt(t *testing.T) {
+	var n uint8
+	testMapperReadValue(t, "254", &n)
+	if n != 254 {
+		t.Errorf("%v != 254", n)
+	}
+
+	var un uint16
+	testMapperReadValue(t, "666", &un)
+	if un != 666 {
+		t.Errorf("%v != 666", un)
+	}
+}
+
+func BenchmarkMapperReadUint(b *testing.B) {
+	r := newCyclicReader(rbEncode(b, "0xDEAD"))
+	p := rmarsh.NewParser(r)
+	mapper := rmarsh.NewMapper()
+
+	var n int32
+
+	for i := 0; i < b.N; i++ {
+		n = 0
+		p.Reset()
+
+		if err := mapper.ReadValue(p, &n); err != nil {
+			b.Fatal(err)
+		} else if n != 0xDEAD {
+			b.Fatalf("%X != 0xDEAD", n)
 		}
 	}
 }

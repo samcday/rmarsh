@@ -96,6 +96,10 @@ func newTypeDecoder(t reflect.Type) decoderFunc {
 	switch t.Kind() {
 	case reflect.Bool:
 		return boolDecoder
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return intDecoder
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return uintDecoder
 	case reflect.Ptr:
 		return newPtrDecoder(t)
 	}
@@ -116,6 +120,7 @@ func boolDecoder(p *Parser, v reflect.Value) error {
 	case TokenTrue, TokenFalse:
 		v.SetBool(tok == TokenTrue)
 		return nil
+	// TODO: support other types and coerce them to something bool-y?
 	default:
 		// TODO: build a path
 		return fmt.Errorf("Unexpected token %v encountered while decoding bool", tok)
@@ -124,6 +129,51 @@ func boolDecoder(p *Parser, v reflect.Value) error {
 
 func intEncoder(gen *Generator, v reflect.Value) error {
 	return gen.Fixnum(v.Int())
+}
+
+func intDecoder(p *Parser, v reflect.Value) error {
+	tok, err := p.Next()
+	if err != nil {
+		return err
+	}
+
+	switch tok {
+	case TokenFixnum:
+		n, err := p.Int()
+		if err != nil {
+			return err
+		}
+		if v.OverflowInt(n) {
+			return fmt.Errorf("Decoded int %d exceeds maximum width of %s", v.Type())
+		}
+		v.SetInt(n)
+		return nil
+	default:
+		return fmt.Errorf("Unexpected token %v encountered while decoding int", tok)
+	}
+}
+
+func uintDecoder(p *Parser, v reflect.Value) error {
+	tok, err := p.Next()
+	if err != nil {
+		return err
+	}
+
+	switch tok {
+	case TokenFixnum:
+		n, err := p.Int()
+		if err != nil {
+			return err
+		}
+		un := uint64(n)
+		if v.OverflowUint(un) {
+			return fmt.Errorf("Decoded int %d exceeds maximum width of %s", v.Type())
+		}
+		v.SetUint(un)
+		return nil
+	default:
+		return fmt.Errorf("Unexpected token %v encountered while decoding uint", tok)
+	}
 }
 
 func uintEncoder(gen *Generator, v reflect.Value) error {
