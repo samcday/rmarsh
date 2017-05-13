@@ -98,3 +98,26 @@ func rbDecode(t testing.TB, b []byte) string {
 	}
 	return rbDecOut.Text()
 }
+
+type cyclicReader struct {
+	b   []byte
+	off int
+	sz  int
+}
+
+func (r *cyclicReader) Read(b []byte) (int, error) {
+	n := copy(b, r.b[r.off:])
+	r.off += n
+	if r.off >= r.sz {
+		r.off = 0
+	}
+	return n, nil
+}
+
+func newCyclicReader(b []byte) *cyclicReader {
+	return &cyclicReader{
+		b:   b,
+		off: 0,
+		sz:  len(b),
+	}
+}
