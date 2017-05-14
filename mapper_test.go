@@ -51,6 +51,14 @@ func BenchmarkMapperWriteTrue(b *testing.B) {
 	}
 }
 
+func TestMapperWriteValueInt(t *testing.T) {
+	testMapperWriteValue(t, `123456`, 123456)
+}
+
+func TestMapperWriteValueFloat(t *testing.T) {
+	testMapperWriteValue(t, `123.321`, 123.321)
+}
+
 func TestMapperReadValueBool(t *testing.T) {
 	var v bool
 	testMapperReadValue(t, "true", &v)
@@ -123,5 +131,13 @@ func BenchmarkMapperReadUint(b *testing.B) {
 		} else if n != 0xDEAD {
 			b.Fatalf("%X != 0xDEAD", n)
 		}
+	}
+}
+
+func TestMapperReadValueFloat(t *testing.T) {
+	var n float32
+	testMapperReadValue(t, "123.321", &n)
+	if n != 123.321 {
+		t.Errorf("%v != 123.321", n)
 	}
 }

@@ -36,6 +36,8 @@ func newTypeEncoder(t reflect.Type) encoderFunc {
 		return intEncoder
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		return uintEncoder
+	case reflect.Float32, reflect.Float64:
+		return floatEncoder
 	case reflect.Ptr:
 		return newPtrEncoder(t)
 	}
@@ -55,8 +57,8 @@ func uintEncoder(gen *Generator, v reflect.Value) error {
 	return gen.Fixnum(int64(v.Uint()))
 }
 
-func unsupportedTypeEncoder(gen *Generator, v reflect.Value) error {
-	return fmt.Errorf("unsupported type %s", v.Type())
+func floatEncoder(gen *Generator, v reflect.Value) error {
+	return gen.Float(v.Float())
 }
 
 type ptrEncoder struct {
@@ -73,4 +75,8 @@ func (e *ptrEncoder) encode(gen *Generator, v reflect.Value) error {
 func newPtrEncoder(t reflect.Type) encoderFunc {
 	enc := &ptrEncoder{newTypeEncoder(t.Elem())}
 	return enc.encode
+}
+
+func unsupportedTypeEncoder(gen *Generator, v reflect.Value) error {
+	return fmt.Errorf("unsupported type %s", v.Type())
 }

@@ -36,6 +36,8 @@ func newTypeDecoder(t reflect.Type) decoderFunc {
 		return intDecoder
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		return uintDecoder
+	case reflect.Float32, reflect.Float64:
+		return floatDecoder
 	case reflect.Ptr:
 		return newPtrDecoder(t)
 	}
@@ -100,6 +102,28 @@ func uintDecoder(p *Parser, v reflect.Value) error {
 		return nil
 	default:
 		return fmt.Errorf("Unexpected token %v encountered while decoding uint", tok)
+	}
+}
+
+func floatDecoder(p *Parser, v reflect.Value) error {
+	tok, err := p.Next()
+	if err != nil {
+		return err
+	}
+
+	switch tok {
+	case TokenFloat:
+		f, err := p.Float()
+		if err != nil {
+			return err
+		}
+		if v.OverflowFloat(f) {
+			return fmt.Errorf("Decoded float %f exceeds maximum width of %s", v.Type())
+		}
+		v.SetFloat(f)
+		return nil
+	default:
+		return fmt.Errorf("Unexpected token %v encountered while decoding float", tok)
 	}
 }
 
