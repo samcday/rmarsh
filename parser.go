@@ -1,7 +1,6 @@
 package rmarsh
 
 import (
-	"encoding/binary"
 	"io"
 	"math/big"
 	"reflect"
@@ -180,6 +179,9 @@ func (p *Parser) Float() (float64, error) {
 		return 0, errors.Errorf("rmarsh.Parser.Float() called for wrong token: %s", p.cur)
 	}
 
+	// Avoid some unnecessary allocations by constructing a raw string view over the bytes. This is safe because the
+	// fake string is not leaked outside of this method call - the bytes only need to stay constant for the call to
+	// strconv.ParseFloat.
 	bytesHeader := (*reflect.SliceHeader)(unsafe.Pointer(&p.ctx))
 	strHeader := reflect.StringHeader{bytesHeader.Data, bytesHeader.Len}
 	str := *(*string)(unsafe.Pointer(&strHeader))
@@ -231,9 +233,8 @@ func (p *Parser) Bignum() (big.Int, error) {
 }
 
 // Bytes returns the raw bytes for the current token.
-// NOTE: The return byte slice is the one that is used internally, it will
-// be modified on the next call to Next(). If any data needs to be kept,
-// be sure to copy it out of the returned buffer.
+// NOTE: The return byte slice is the one that is used internally, it will be modified on the next call to Next().
+// If any data needs to be kept, be sure to copy it out of the returned buffer.
 func (p *Parser) Bytes() []byte {
 	return p.ctx
 }
@@ -267,7 +268,7 @@ func (p *Parser) adv() (err error) {
 		if b, err := p.readbytes(3); err != nil {
 			return errors.Wrap(err, "reading magic")
 		} else if b[0] != 0x04 || b[1] != 0x08 {
-			return errors.Errorf("Expected magic header 0x0408, got 0x%.4X", binary.BigEndian.Uint16(magic))
+			return errors.Errorf("Expected magic header 0x0408, got 0x%.4X", int16(b[0])<<8|int16(b[1]))
 		} else {
 			// Silly little optimisation: we fetched 3 bytes on the first
 			// read since there is always at least one token to read.

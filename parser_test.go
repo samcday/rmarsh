@@ -36,6 +36,15 @@ func BenchmarkParserReset(b *testing.B) {
 	}
 }
 
+func TestParserInvalidMagic(t *testing.T) {
+	raw := []byte{0x04, 0x07, '0'}
+	p := rmarsh.NewParser(bytes.NewReader(raw))
+	_, err := p.Next()
+	if err == nil || err.Error() != "rmarsh.Parser.Next(): Expected magic header 0x0408, got 0x0407" {
+		t.Fatalf("Unexpected err %s", err)
+	}
+}
+
 func TestParserNil(t *testing.T) {
 	p := parseFromRuby(t, "nil")
 	expectToken(t, p, rmarsh.TokenNil)
