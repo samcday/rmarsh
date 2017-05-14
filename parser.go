@@ -172,6 +172,28 @@ func (p *Parser) Next() (Token, error) {
 	return p.cur, nil
 }
 
+// ExpectNext is a convenience method that calls Next() and ensures the next token is the one provided.
+func (p *Parser) ExpectNext(exp Token) error {
+	tok, err := p.Next()
+	if err != nil {
+		return err
+	}
+	if tok != exp {
+		return errors.Errorf("rmarsh.Parser.ExpectNext(): read token %s, expected %s", tok, exp)
+	}
+	return nil
+}
+
+// Len returns the number of elements to be read in the current structure.
+// Returns 0 if the current token is not TokenStartArray, TokenStartHash, etc.
+func (p *Parser) Len() int {
+	if p.cur != TokenStartArray && p.cur != TokenStartHash {
+		return 0
+	}
+
+	return p.cst.sz
+}
+
 // Int returns the value contained in the current Fixnum token.
 // Returns an error if called for any other type of token.
 func (p *Parser) Int() (int64, error) {
