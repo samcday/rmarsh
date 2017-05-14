@@ -38,6 +38,8 @@ func newTypeEncoder(t reflect.Type) encoderFunc {
 		return uintEncoder
 	case reflect.Float32, reflect.Float64:
 		return floatEncoder
+	case reflect.String:
+		return stringEncoder
 	case reflect.Ptr:
 		return newPtrEncoder(t)
 	}
@@ -59,6 +61,22 @@ func uintEncoder(gen *Generator, v reflect.Value) error {
 
 func floatEncoder(gen *Generator, v reflect.Value) error {
 	return gen.Float(v.Float())
+}
+
+func stringEncoder(gen *Generator, v reflect.Value) (err error) {
+	if err = gen.StartIVar(1); err != nil {
+		return
+	}
+	if err = gen.String(v.String()); err != nil {
+		return
+	}
+	if err = gen.Symbol("E"); err != nil {
+		return
+	}
+	if err = gen.Bool(true); err != nil {
+		return
+	}
+	return gen.EndIVar()
 }
 
 type ptrEncoder struct {

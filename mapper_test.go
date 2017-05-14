@@ -31,6 +31,19 @@ func testMapperReadValue(t *testing.T, expr string, v interface{}) {
 	}
 }
 
+func TestMapperWriteValueNilPtrs(t *testing.T) {
+	ptrs := []interface{}{
+		(*bool)(nil),
+		(*int32)(nil),
+		(*float64)(nil),
+		(*string)(nil),
+	}
+
+	for _, ptr := range ptrs {
+		testMapperWriteValue(t, `nil`, ptr)
+	}
+}
+
 func TestMapperWriteValueBool(t *testing.T) {
 	testMapperWriteValue(t, `true`, true)
 	v := true
@@ -57,6 +70,10 @@ func TestMapperWriteValueInt(t *testing.T) {
 
 func TestMapperWriteValueFloat(t *testing.T) {
 	testMapperWriteValue(t, `123.321`, 123.321)
+}
+
+func TestMapperWriteValueString(t *testing.T) {
+	testMapperWriteValue(t, `"test"`, "test")
 }
 
 func TestMapperReadValueBool(t *testing.T) {
@@ -139,5 +156,13 @@ func TestMapperReadValueFloat(t *testing.T) {
 	testMapperReadValue(t, "123.321", &n)
 	if n != 123.321 {
 		t.Errorf("%v != 123.321", n)
+	}
+}
+
+func TestMapperReadValueString(t *testing.T) {
+	var s string
+	testMapperReadValue(t, `[116,101,115,116].pack('c*')`, &s)
+	if s != "test" {
+		t.Errorf(`%v != "test"`, s)
 	}
 }

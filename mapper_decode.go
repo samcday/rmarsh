@@ -38,6 +38,8 @@ func newTypeDecoder(t reflect.Type) decoderFunc {
 		return uintDecoder
 	case reflect.Float32, reflect.Float64:
 		return floatDecoder
+	case reflect.String:
+		return stringDecoder
 	case reflect.Ptr:
 		return newPtrDecoder(t)
 	}
@@ -124,6 +126,25 @@ func floatDecoder(p *Parser, v reflect.Value) error {
 		return nil
 	default:
 		return fmt.Errorf("Unexpected token %v encountered while decoding float", tok)
+	}
+}
+
+func stringDecoder(p *Parser, v reflect.Value) error {
+	tok, err := p.Next()
+	if err != nil {
+		return err
+	}
+
+	switch tok {
+	case TokenString, TokenSymbol:
+		str, err := p.Text()
+		if err != nil {
+			return err
+		}
+		v.SetString(str)
+		return nil
+	default:
+		return fmt.Errorf("Unexpected token %v encountered while decoding string", tok)
 	}
 }
 
