@@ -2,7 +2,10 @@ package rmarsh
 
 import (
 	"math/big"
-	"reflect"
+)
+
+var (
+	magic = []byte{4, 8}
 )
 
 const (
@@ -28,21 +31,12 @@ const (
 	TYPE_STRUCT     = 'S'
 )
 
-var (
-	magic = []byte{4, 8}
-
-	symbolType   = reflect.TypeOf(Symbol(""))
-	classType    = reflect.TypeOf(Class(""))
-	moduleType   = reflect.TypeOf(Module(""))
-	instanceType = reflect.TypeOf(Instance{})
-	regexpType   = reflect.TypeOf(Regexp{})
-	ivarType     = reflect.TypeOf(IVar{})
-
-	bigIntType   = reflect.TypeOf(*big.NewInt(0))
-	bigFloatType = reflect.TypeOf(*big.NewFloat(0))
-
-	ifaceType  = reflect.TypeOf(new(interface{})).Elem()
-	stringType = reflect.TypeOf("")
+const (
+	REGEXP_IGNORECASE    = 1
+	REGEXP_EXTENDED      = 1 << 1
+	REGEXP_MULTILINE     = 1 << 2
+	REGEXP_FIXEDENCODING = 1 << 4
+	REGEXP_NOENCODING    = 1 << 5
 )
 
 const (
@@ -54,8 +48,8 @@ const (
 	fixnumMaxBytes = 5
 )
 
+// Ripped from math/big since we deal with the raw Words ourselves
 const (
-	// Ripped from math/big since we deal with the raw Words ourselves
 	_m    = ^big.Word(0)
 	_logS = _m>>8&1 + _m>>16&1 + _m>>32&1
 	_S    = 1 << _logS

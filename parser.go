@@ -35,6 +35,7 @@ const (
 	TokenEndHash
 	TokenStartIVar
 	TokenEndIVar
+	TokenLink
 	TokenEOF
 )
 
@@ -53,6 +54,7 @@ var tokenNames = map[Token]string{
 	TokenEndHash:    "TokenEndHash",
 	TokenStartIVar:  "TokenStartIVar",
 	TokenEndIVar:    "TokenEndIVar",
+	TokenLink:       "TokenLink",
 	TokenEOF:        "EOF",
 }
 
@@ -94,6 +96,9 @@ type Parser struct {
 	bnumsign byte
 
 	symTbl symTable
+
+	isLink bool
+	linkId int
 }
 
 // NewParser constructs a new parser that streams data from the given io.Reader

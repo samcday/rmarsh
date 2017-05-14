@@ -350,3 +350,20 @@ func TestParserIVarString(t *testing.T) {
 	expectToken(t, p, rmarsh.TokenEndIVar)
 	expectToken(t, p, rmarsh.TokenEOF)
 }
+
+// func TestParserLink(t *testing.T) {
+// 	p := parseFromRuby(t, `a = 1.2; [a, a]`)
+// 	expectToken(t, p, rmarsh.TokenStartArray)
+// 	if id, ok := p.LinkId(); ok != true || id != 0 {
+// 		t.Errorf("p.LinkId() = %d, %b != 0, true", id, ok)
+// 	}
+// 	expectToken(t, p, rmarsh.TokenFloat)
+// 	if id, ok := p.LinkId(); ok != true || id != 1 {
+// 		t.Errorf("p.LinkId() = %d, %b != 1, true", id, ok)
+// 	}
+// 	expectToken(t, p, rmarsh.TokenLink)
+// 	if id, ok := p.LinkId(); ok != true || id != 1 {
+// 		t.Errorf("p.LinkId() = %d, %b != 1, true", id, ok)
+// 	}
+// 	expectToken(t, p, rmarsh.TokenEndArray)
+// }
