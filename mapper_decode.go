@@ -75,7 +75,7 @@ func intDecoder(p *Parser, v reflect.Value) error {
 			return err
 		}
 		if v.OverflowInt(n) {
-			return fmt.Errorf("Decoded int %d exceeds maximum width of %s", v.Type())
+			return fmt.Errorf("Decoded int %d exceeds maximum width of %s", n, v.Type())
 		}
 		v.SetInt(n)
 		return nil
@@ -98,7 +98,7 @@ func uintDecoder(p *Parser, v reflect.Value) error {
 		}
 		un := uint64(n)
 		if v.OverflowUint(un) {
-			return fmt.Errorf("Decoded int %d exceeds maximum width of %s", v.Type())
+			return fmt.Errorf("Decoded uint %d exceeds maximum width of %s", n, v.Type())
 		}
 		v.SetUint(un)
 		return nil
@@ -120,7 +120,7 @@ func floatDecoder(p *Parser, v reflect.Value) error {
 			return err
 		}
 		if v.OverflowFloat(f) {
-			return fmt.Errorf("Decoded float %f exceeds maximum width of %s", v.Type())
+			return fmt.Errorf("Decoded float %f exceeds maximum width of %s", f, v.Type())
 		}
 		v.SetFloat(f)
 		return nil

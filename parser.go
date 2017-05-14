@@ -188,7 +188,7 @@ func (p *Parser) Float() (float64, error) {
 	// fake string is not leaked outside of this method call - the bytes only need to stay constant for the call to
 	// strconv.ParseFloat.
 	bytesHeader := (*reflect.SliceHeader)(unsafe.Pointer(&p.ctx))
-	strHeader := reflect.StringHeader{bytesHeader.Data, bytesHeader.Len}
+	strHeader := reflect.StringHeader{Data: bytesHeader.Data, Len: bytesHeader.Len}
 	str := *(*string)(unsafe.Pointer(&strHeader))
 
 	flt, err := strconv.ParseFloat(str, 64)
