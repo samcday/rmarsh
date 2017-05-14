@@ -32,7 +32,7 @@ func BenchmarkParserReset(b *testing.B) {
 	p := rmarsh.NewParser(buf)
 
 	for i := 0; i < b.N; i++ {
-		p.Reset()
+		p.Reset(nil)
 	}
 }
 
@@ -58,7 +58,7 @@ func BenchmarkParserNil(b *testing.B) {
 	p := rmarsh.NewParser(buf)
 
 	for i := 0; i < b.N; i++ {
-		p.Reset()
+		p.Reset(nil)
 
 		if tok, err := p.Next(); err != nil || tok != rmarsh.TokenNil {
 			b.Fatalf("%v %v", tok, err)
@@ -81,7 +81,7 @@ func BenchmarkParserBool(b *testing.B) {
 	p := rmarsh.NewParser(buf)
 
 	for i := 0; i < b.N; i++ {
-		p.Reset()
+		p.Reset(nil)
 
 		if tok, err := p.Next(); err != nil || tok != rmarsh.TokenTrue {
 			b.Fatalf("%v %v", tok, err)
@@ -111,7 +111,7 @@ func BenchmarkParserFixnum(b *testing.B) {
 	p := rmarsh.NewParser(buf)
 
 	for i := 0; i < b.N; i++ {
-		p.Reset()
+		p.Reset(nil)
 
 		if tok, err := p.Next(); err != nil || tok != rmarsh.TokenFixnum {
 			b.Fatalf("%v %v", tok, err)
@@ -144,7 +144,7 @@ func BenchmarkParserFloat(b *testing.B) {
 	p := rmarsh.NewParser(buf)
 
 	for i := 0; i < b.N; i++ {
-		p.Reset()
+		p.Reset(nil)
 
 		if tok, err := p.Next(); err != nil || tok != rmarsh.TokenFloat {
 			b.Fatalf("%v %v", tok, err)
@@ -177,7 +177,7 @@ func BenchmarkParserBignum(b *testing.B) {
 	p := rmarsh.NewParser(buf)
 
 	for i := 0; i < b.N; i++ {
-		p.Reset()
+		p.Reset(nil)
 
 		if tok, err := p.Next(); err != nil || tok != rmarsh.TokenBignum {
 			b.Fatalf("%v %v", tok, err)
@@ -205,7 +205,7 @@ func BenchmarkParserSymbol(b *testing.B) {
 	exp := []byte("test")
 
 	for i := 0; i < b.N; i++ {
-		p.Reset()
+		p.Reset(nil)
 
 		if tok, err := p.Next(); err != nil || tok != rmarsh.TokenSymbol {
 			b.Fatalf("%v %v", tok, err)
@@ -234,7 +234,7 @@ func BenchmarkParserString(b *testing.B) {
 	exp := []byte("test")
 
 	for i := 0; i < b.N; i++ {
-		p.Reset()
+		p.Reset(nil)
 
 		if tok, err := p.Next(); err != nil || tok != rmarsh.TokenString {
 			b.Fatalf("%v %v", tok, err)
@@ -257,7 +257,7 @@ func BenchmarkParserEmptyArray(b *testing.B) {
 	p := rmarsh.NewParser(buf)
 
 	for i := 0; i < b.N; i++ {
-		p.Reset()
+		p.Reset(nil)
 
 		if tok, err := p.Next(); err != nil || tok != rmarsh.TokenStartArray {
 			b.Fatalf("%v %v", tok, err)

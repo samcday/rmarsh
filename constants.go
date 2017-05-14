@@ -9,34 +9,35 @@ var (
 )
 
 const (
-	TYPE_NIL        = '0'
-	TYPE_TRUE       = 'T'
-	TYPE_FALSE      = 'F'
-	TYPE_FIXNUM     = 'i'
-	TYPE_BIGNUM     = 'l'
-	TYPE_FLOAT      = 'f'
-	TYPE_ARRAY      = '['
-	TYPE_HASH       = '{'
-	TYPE_SYMBOL     = ':'
-	TYPE_SYMLINK    = ';'
-	TYPE_STRING     = '"'
-	TYPE_REGEXP     = '/'
-	TYPE_IVAR       = 'I'
-	TYPE_CLASS      = 'c'
-	TYPE_MODULE     = 'm'
-	TYPE_OBJECT     = 'o'
-	TYPE_LINK       = '@'
-	TYPE_USRMARSHAL = 'U'
-	TYPE_USRDEF     = 'u'
-	TYPE_STRUCT     = 'S'
+	typeNil        = '0'
+	typeTrue       = 'T'
+	typeFalse      = 'F'
+	typeFixnum     = 'i'
+	typeBignum     = 'l'
+	typeFloat      = 'f'
+	typeArray      = '['
+	typeHash       = '{'
+	typeSymbol     = ':'
+	typeSymlink    = ';'
+	typeString     = '"'
+	typeRegExp     = '/'
+	typeIvar       = 'I'
+	typeClass      = 'c'
+	typeModule     = 'm'
+	typeObject     = 'o'
+	typeLink       = '@'
+	typeUsrMarshal = 'U'
+	typeUsrDef     = 'u'
+	typeStruct     = 'S'
 )
 
+// Modifier flags for Ruby regular expressions
 const (
-	REGEXP_IGNORECASE    = 1
-	REGEXP_EXTENDED      = 1 << 1
-	REGEXP_MULTILINE     = 1 << 2
-	REGEXP_FIXEDENCODING = 1 << 4
-	REGEXP_NOENCODING    = 1 << 5
+	RegexpIgnoreCase    = 1
+	RegexpExtended      = 1 << 1
+	RegexpMultiline     = 1 << 2
+	RegexpFixedEncoding = 1 << 4
+	RegexpNoEncoding    = 1 << 5
 )
 
 const (

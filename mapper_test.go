@@ -108,7 +108,7 @@ func BenchmarkMapperReadTrue(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		v = false
-		p.Reset()
+		p.Reset(nil)
 
 		if err := mapper.ReadValue(p, &v); err != nil {
 			b.Fatal(err)
@@ -141,7 +141,7 @@ func BenchmarkMapperReadUint(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		n = 0
-		p.Reset()
+		p.Reset(nil)
 
 		if err := mapper.ReadValue(p, &n); err != nil {
 			b.Fatal(err)

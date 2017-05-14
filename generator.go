@@ -10,15 +10,23 @@ import (
 	"github.com/pkg/errors"
 )
 
+// ErrGeneratorFinished is the error returned when a value is written to a Marshal stream that has already completed.
 var ErrGeneratorFinished = fmt.Errorf("Write on finished Marshal stream")
+
+// ErrGeneratorOverflow is the error returned when a value is written past the end of a bounded structure such as an
+// array, hash, ivar, struct, etc.
 var ErrGeneratorOverflow = fmt.Errorf("Write past end of bounded array/hash/ivar")
-var ErrNonSymbolValue = fmt.Errorf("Non Symbol value written when Symbol expected.")
+
+// ErrNonSymbolValue is the error returned when anything other than a Symbol is written when a Symbol was expected to
+// be the next value. This expectation is enforced when writing the keys of an ivar, struct and object.
+var ErrNonSymbolValue = fmt.Errorf("Non Symbol value written when Symbol expected")
 
 const (
 	genStateGrowSize = 8 // Initial size + amount to grow state stack by
 	symTblGrowSize   = 8
 )
 
+// Generator is a low-level streaming implementation of the Ruby Marshal 4.8 format.
 type Generator struct {
 	w  io.Writer
 	c  int
@@ -31,6 +39,8 @@ type Generator struct {
 	symTbl   []string
 }
 
+// NewGenerator returns a new Generator that is ready to start writing out a Ruby Marshal stream. Generators are not
+// thread safe, but can be reused for new Marshal streams by calling Reset().
 func NewGenerator(w io.Writer) *Generator {
 	gen := &Generator{
 		w:   w,
@@ -65,7 +75,7 @@ func (gen *Generator) Nil() error {
 		return err
 	}
 
-	gen.buf[gen.bufn] = TYPE_NIL
+	gen.buf[gen.bufn] = typeNil
 	gen.bufn++
 	return gen.writeAdv()
 }
@@ -77,9 +87,9 @@ func (gen *Generator) Bool(b bool) error {
 	}
 
 	if b {
-		gen.buf[gen.bufn] = TYPE_TRUE
+		gen.buf[gen.bufn] = typeTrue
 	} else {
-		gen.buf[gen.bufn] = TYPE_FALSE
+		gen.buf[gen.bufn] = typeFalse
 	}
 	gen.bufn++
 
@@ -100,7 +110,7 @@ func (gen *Generator) Fixnum(n int64) error {
 		return err
 	}
 
-	gen.buf[gen.bufn] = TYPE_FIXNUM
+	gen.buf[gen.bufn] = typeFixnum
 	gen.bufn++
 	gen.encodeLong(n)
 	return gen.writeAdv()
@@ -137,7 +147,7 @@ func (gen *Generator) Bignum(b *big.Int) error {
 		return err
 	}
 
-	gen.buf[gen.bufn] = TYPE_BIGNUM
+	gen.buf[gen.bufn] = typeBignum
 	gen.bufn++
 	if b.Sign() < 0 {
 		gen.buf[gen.bufn] = '-'
@@ -181,7 +191,7 @@ func (gen *Generator) writeSym(sym string) {
 
 	for i := 0; i < gen.symCount; i++ {
 		if gen.symTbl[i] == sym {
-			gen.buf[gen.bufn] = TYPE_SYMLINK
+			gen.buf[gen.bufn] = typeSymlink
 			gen.bufn++
 			gen.encodeLong(int64(i))
 			return
@@ -189,7 +199,7 @@ func (gen *Generator) writeSym(sym string) {
 	}
 
 	l := len(sym)
-	gen.buf[gen.bufn] = TYPE_SYMBOL
+	gen.buf[gen.bufn] = typeSymbol
 	gen.bufn++
 	gen.encodeLong(int64(l))
 	copy(gen.buf[gen.bufn:], sym)
@@ -228,7 +238,7 @@ func (gen *Generator) String(str string) error {
 		return err
 	}
 
-	gen.buf[gen.bufn] = TYPE_STRING
+	gen.buf[gen.bufn] = typeString
 	gen.bufn++
 	gen.writeString(str)
 
@@ -243,7 +253,7 @@ func (gen *Generator) Float(f float64) error {
 		return err
 	}
 
-	gen.buf[gen.bufn] = TYPE_FLOAT
+	gen.buf[gen.bufn] = typeFloat
 	gen.bufn++
 
 	// We pass a 0 len slice of our scratch buffer to append float.
@@ -264,7 +274,7 @@ func (gen *Generator) StartArray(l int) error {
 	if err := gen.checkState(false, 1+fixnumMaxBytes); err != nil {
 		return err
 	}
-	gen.buf[gen.bufn] = TYPE_ARRAY
+	gen.buf[gen.bufn] = typeArray
 	gen.bufn++
 	gen.encodeLong(int64(l))
 
@@ -291,7 +301,7 @@ func (gen *Generator) StartHash(l int) error {
 	if err := gen.checkState(false, 1+fixnumMaxBytes); err != nil {
 		return err
 	}
-	gen.buf[gen.bufn] = TYPE_HASH
+	gen.buf[gen.bufn] = typeHash
 	gen.bufn++
 	gen.encodeLong(int64(l))
 
@@ -319,7 +329,7 @@ func (gen *Generator) Class(name string) error {
 		return err
 	}
 
-	gen.buf[gen.bufn] = TYPE_CLASS
+	gen.buf[gen.bufn] = typeClass
 	gen.bufn++
 	gen.encodeLong(int64(l))
 	copy(gen.buf[gen.bufn:], name)
@@ -335,7 +345,7 @@ func (gen *Generator) Module(name string) error {
 		return err
 	}
 
-	gen.buf[gen.bufn] = TYPE_MODULE
+	gen.buf[gen.bufn] = typeModule
 	gen.bufn++
 	gen.encodeLong(int64(l))
 	copy(gen.buf[gen.bufn:], name)
@@ -351,7 +361,7 @@ func (gen *Generator) StartIVar(l int) error {
 	if err := gen.checkState(false, 1+fixnumMaxBytes); err != nil {
 		return err
 	}
-	gen.buf[gen.bufn] = TYPE_IVAR
+	gen.buf[gen.bufn] = typeIvar
 	gen.bufn++
 
 	gen.st.push(genStIVar, l*2)
@@ -383,7 +393,7 @@ func (gen *Generator) StartObject(name string, l int) error {
 	if err := gen.checkState(false, 1+1+fixnumMaxBytes+len(name)+fixnumMaxBytes); err != nil {
 		return err
 	}
-	gen.buf[gen.bufn] = TYPE_OBJECT
+	gen.buf[gen.bufn] = typeObject
 	gen.bufn++
 
 	gen.writeSym(name)
@@ -415,7 +425,7 @@ func (gen *Generator) StartUserMarshalled(name string) error {
 	if err := gen.checkState(false, 1+1+fixnumMaxBytes+len(name)); err != nil {
 		return err
 	}
-	gen.buf[gen.bufn] = TYPE_USRMARSHAL
+	gen.buf[gen.bufn] = typeUsrMarshal
 	gen.bufn++
 
 	gen.writeSym(name)
@@ -437,14 +447,14 @@ func (gen *Generator) EndUserMarshalled() error {
 	return gen.writeAdv()
 }
 
-// UsrDef writes a user defined object with the given name and data string to the Marshal stream.
+// UserDefinedObject writes a user defined object with the given name and data string to the Marshal stream.
 // User defined objects are Ruby objects that have a _load function that accepts a string and construct the object.
 // If you need to specify encoding on the data string, open an IVar context with StartIVar before calling this method.
 func (gen *Generator) UserDefinedObject(name, data string) error {
 	if err := gen.checkState(false, 1+fixnumMaxBytes+len(name)+fixnumMaxBytes+len(data)); err != nil {
 		return err
 	}
-	gen.buf[gen.bufn] = TYPE_USRDEF
+	gen.buf[gen.bufn] = typeUsrDef
 	gen.bufn++
 
 	gen.writeSym(name)
@@ -464,7 +474,7 @@ func (gen *Generator) Regexp(expr string, flags byte) error {
 		return err
 	}
 
-	gen.buf[gen.bufn] = TYPE_REGEXP
+	gen.buf[gen.bufn] = typeRegExp
 	gen.bufn++
 	gen.writeString(expr)
 	gen.buf[gen.bufn] = flags
@@ -479,7 +489,7 @@ func (gen *Generator) StartStruct(name string, l int) error {
 	if err := gen.checkState(false, 1+1+fixnumMaxBytes+len(name)+fixnumMaxBytes); err != nil {
 		return err
 	}
-	gen.buf[gen.bufn] = TYPE_STRUCT
+	gen.buf[gen.bufn] = typeStruct
 	gen.bufn++
 
 	gen.writeSym(name)
@@ -508,9 +518,8 @@ func (gen *Generator) checkState(isSym bool, sz int) error {
 	if gen.st.cur.pos == gen.st.cur.cnt {
 		if gen.st.sz == 1 {
 			return ErrGeneratorFinished
-		} else {
-			return ErrGeneratorOverflow
 		}
+		return ErrGeneratorOverflow
 	}
 
 	if gen.st.cur.typ == genStIVar && gen.st.cur.pos == -1 {

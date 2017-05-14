@@ -465,7 +465,7 @@ func BenchmarkGenUserDefined(b *testing.B) {
 
 func TestGenRegexp(t *testing.T) {
 	testGenerator(t, `/test/i`, func(gen *rmarsh.Generator) error {
-		return gen.Regexp("test", rmarsh.REGEXP_IGNORECASE)
+		return gen.Regexp("test", rmarsh.RegexpIgnoreCase)
 	})
 }
 

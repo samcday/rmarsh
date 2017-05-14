@@ -17,8 +17,10 @@ const (
 	stackGrowSize  = 8    // Amount to grow stack by when needed
 )
 
+// A Token represents a single distinct value type read from a Parser instance.
 type Token uint8
 
+// The valid token types.
 const (
 	tokenStart = iota
 	TokenNil
@@ -71,7 +73,7 @@ const (
 	ctxIVar
 )
 
-type ParserContext struct {
+type parserContext struct {
 	typ uint8
 	sz  int
 	pos int
@@ -79,13 +81,14 @@ type ParserContext struct {
 	ivSym *string // If current context is an IVar, then this will contain the instance variable name
 }
 
+// Parser is a low-level streaming implementation of the Ruby Marshal 4.8 format.
 type Parser struct {
 	r    io.Reader
 	cur  Token
 	pos  uint64
-	st   []ParserContext
+	st   []parserContext
 	stSz int
-	cst  *ParserContext
+	cst  *parserContext
 
 	buf []byte
 	ctx []byte
@@ -96,9 +99,6 @@ type Parser struct {
 	bnumsign byte
 
 	symTbl symTable
-
-	isLink bool
-	linkId int
 }
 
 // NewParser constructs a new parser that streams data from the given io.Reader
@@ -111,7 +111,12 @@ func NewParser(r io.Reader) *Parser {
 	return p
 }
 
-func (p *Parser) Reset() {
+// Reset reverts the Parser into the identity state, ready to read a new Marshal 4.8 stream from the existing Reader.
+// If the provided io.Reader is nil, the existing Reader will continue to be used.
+func (p *Parser) Reset(r io.Reader) {
+	if r != nil {
+		p.r = r
+	}
 	p.pos = 0
 	p.cur = tokenStart
 	p.stSz = 0
@@ -291,24 +296,24 @@ func (p *Parser) adv() (err error) {
 	}
 
 	switch typ {
-	case TYPE_NIL:
+	case typeNil:
 		p.cur = TokenNil
-	case TYPE_TRUE:
+	case typeTrue:
 		p.cur = TokenTrue
-	case TYPE_FALSE:
+	case typeFalse:
 		p.cur = TokenFalse
-	case TYPE_FIXNUM:
+	case typeFixnum:
 		p.cur = TokenFixnum
 		p.num, err = p.long()
 		if err != nil {
 			return errors.Wrap(err, "fixnum")
 		}
-	case TYPE_FLOAT:
+	case typeFloat:
 		p.cur = TokenFloat
 		if err := p.sizedBlob(false); err != nil {
 			return errors.Wrap(err, "float")
 		}
-	case TYPE_BIGNUM:
+	case typeBignum:
 		p.cur = TokenBignum
 		p.bnumsign, err = p.readbyte()
 		if err != nil {
@@ -318,18 +323,18 @@ func (p *Parser) adv() (err error) {
 		if err := p.sizedBlob(true); err != nil {
 			return errors.Wrap(err, "bignum")
 		}
-	case TYPE_SYMBOL:
+	case typeSymbol:
 		p.cur = TokenSymbol
 		if err := p.sizedBlob(false); err != nil {
 			return errors.Wrap(err, "symbol")
 		}
 		p.symTbl.add(p.ctx)
-	case TYPE_STRING:
+	case typeString:
 		p.cur = TokenString
 		if err := p.sizedBlob(false); err != nil {
 			return errors.Wrap(err, "string")
 		}
-	case TYPE_SYMLINK:
+	case typeSymlink:
 		p.cur = TokenSymbol
 		n, err := p.long()
 		if err != nil {
@@ -340,21 +345,21 @@ func (p *Parser) adv() (err error) {
 			return errors.Errorf("Symlink id %d is larger than max known %d", id, p.symTbl.num-1)
 		}
 		p.ctx = p.symTbl.get(id)
-	case TYPE_ARRAY:
+	case typeArray:
 		p.cur = TokenStartArray
 		n, err := p.long()
 		if err != nil {
 			return errors.Wrap(err, "array")
 		}
 		p.pushStack(ctxArray, int(n))
-	case TYPE_HASH:
+	case typeHash:
 		p.cur = TokenStartHash
 		n, err := p.long()
 		if err != nil {
 			return errors.Wrap(err, "hash")
 		}
 		p.pushStack(ctxHash, int(n*2))
-	case TYPE_IVAR:
+	case typeIvar:
 		p.cur = TokenStartIVar
 		p.pushStack(ctxIVar, -1)
 	}
@@ -386,7 +391,7 @@ func (p *Parser) advIVar() (Token, error) {
 func (p *Parser) pushStack(typ uint8, sz int) {
 	// Grow stack if needed
 	if l := len(p.st); p.stSz == l {
-		newStack := make([]ParserContext, l+stackGrowSize)
+		newStack := make([]parserContext, l+stackGrowSize)
 		copy(newStack, p.st)
 		p.st = newStack
 	}
@@ -474,11 +479,11 @@ func (p *Parser) long() (int64, error) {
 }
 
 func (p *Parser) readbyte() (byte, error) {
-	if buf, err := p.readbytes(1); err != nil {
+	buf, err := p.readbytes(1)
+	if err != nil {
 		return 0, err
-	} else {
-		return buf[0], nil
 	}
+	return buf[0], nil
 }
 
 func (p *Parser) readbytes(num uint64) ([]byte, error) {
