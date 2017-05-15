@@ -35,5 +35,6 @@ func (m *Mapper) ReadValue(p *Parser, val interface{}) error {
 		return fmt.Errorf("Invalid decode target %T, did you forget to pass a pointer?", val)
 	}
 
-	return m.valueDecoder(v)(p, v)
+	var ctx decodeContext
+	return m.valueDecoder(v.Elem())(p, v.Elem(), &ctx)
 }

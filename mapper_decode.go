@@ -5,7 +5,20 @@ import (
 	"reflect"
 )
 
-type decoderFunc func(p *Parser, v reflect.Value) error
+type decodeContext struct {
+	curToken Token
+}
+
+func (ctx *decodeContext) nextToken(p *Parser) (Token, error) {
+	if ctx.curToken != tokenStart {
+		tok := ctx.curToken
+		ctx.curToken = tokenStart
+		return tok, nil
+	}
+	return p.Next()
+}
+
+type decoderFunc func(*Parser, reflect.Value, *decodeContext) error
 
 func (m *Mapper) valueDecoder(v reflect.Value) decoderFunc {
 	return m.typeDecoder(v.Type())
@@ -46,8 +59,8 @@ func newTypeDecoder(t reflect.Type) decoderFunc {
 	return unsupportedTypeDecoder
 }
 
-func boolDecoder(p *Parser, v reflect.Value) error {
-	tok, err := p.Next()
+func boolDecoder(p *Parser, v reflect.Value, ctx *decodeContext) error {
+	tok, err := ctx.nextToken(p)
 	if err != nil {
 		return err
 	}
@@ -62,8 +75,8 @@ func boolDecoder(p *Parser, v reflect.Value) error {
 		return fmt.Errorf("Unexpected token %v encountered while decoding bool", tok)
 	}
 }
-func intDecoder(p *Parser, v reflect.Value) error {
-	tok, err := p.Next()
+func intDecoder(p *Parser, v reflect.Value, ctx *decodeContext) error {
+	tok, err := ctx.nextToken(p)
 	if err != nil {
 		return err
 	}
@@ -84,8 +97,8 @@ func intDecoder(p *Parser, v reflect.Value) error {
 	}
 }
 
-func uintDecoder(p *Parser, v reflect.Value) error {
-	tok, err := p.Next()
+func uintDecoder(p *Parser, v reflect.Value, ctx *decodeContext) error {
+	tok, err := ctx.nextToken(p)
 	if err != nil {
 		return err
 	}
@@ -107,8 +120,8 @@ func uintDecoder(p *Parser, v reflect.Value) error {
 	}
 }
 
-func floatDecoder(p *Parser, v reflect.Value) error {
-	tok, err := p.Next()
+func floatDecoder(p *Parser, v reflect.Value, ctx *decodeContext) error {
+	tok, err := ctx.nextToken(p)
 	if err != nil {
 		return err
 	}
@@ -129,8 +142,8 @@ func floatDecoder(p *Parser, v reflect.Value) error {
 	}
 }
 
-func stringDecoder(p *Parser, v reflect.Value) error {
-	tok, err := p.Next()
+func stringDecoder(p *Parser, v reflect.Value, ctx *decodeContext) error {
+	tok, err := ctx.nextToken(p)
 	if err != nil {
 		return err
 	}
@@ -152,11 +165,27 @@ type ptrDecoder struct {
 	elemDec decoderFunc
 }
 
-func (d *ptrDecoder) decode(p *Parser, v reflect.Value) error {
+func (d *ptrDecoder) decode(p *Parser, v reflect.Value, ctx *decodeContext) error {
+	tok, err := ctx.nextToken(p)
+	if err != nil {
+		return err
+	}
+
+	// If the token is nil, then we nil the ptr and move on.
+	if tok == TokenNil {
+		v.Set(reflect.Zero(v.Type()))
+		return nil
+	}
+
+	// TODO: if the token is a link, we dig up the cached reference and use that.
+
+	// Push the token back and decode against resolved ptr.
+	ctx.curToken = tok
+
 	if v.IsNil() {
 		v.Set(reflect.New(v.Type().Elem()))
 	}
-	return d.elemDec(p, v.Elem())
+	return d.elemDec(p, v.Elem(), ctx)
 }
 
 func newPtrDecoder(t reflect.Type) decoderFunc {
@@ -164,6 +193,6 @@ func newPtrDecoder(t reflect.Type) decoderFunc {
 	return dec.decode
 }
 
-func unsupportedTypeDecoder(p *Parser, v reflect.Value) error {
+func unsupportedTypeDecoder(p *Parser, v reflect.Value, ctx *decodeContext) error {
 	return fmt.Errorf("unsupported type %s", v.Type())
 }

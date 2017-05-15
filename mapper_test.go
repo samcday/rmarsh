@@ -76,6 +76,16 @@ func TestMapperWriteValueString(t *testing.T) {
 	testMapperWriteValue(t, `"test"`, "test")
 }
 
+func TestMapperReadValueNilPtr(t *testing.T) {
+	b := true
+	ptr := &b
+	testMapperReadValue(t, "nil", &ptr)
+
+	if ptr != nil {
+		t.Fatalf("ptr %+v is not nil", ptr)
+	}
+}
+
 func TestMapperReadValueBool(t *testing.T) {
 	var v bool
 	testMapperReadValue(t, "true", &v)
