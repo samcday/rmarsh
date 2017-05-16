@@ -2,43 +2,72 @@ package rmarsh
 
 import (
 	"fmt"
+	"io"
 	"reflect"
+	"sync"
 )
 
-type decodeContext struct {
+// A Decoder decodes a Ruby Marshal stream into concrete Golang structures.
+type Decoder struct {
+	p *Parser
+
 	curToken Token
 }
 
-func (ctx *decodeContext) nextToken(p *Parser) (Token, error) {
-	if ctx.curToken != tokenStart {
-		tok := ctx.curToken
-		ctx.curToken = tokenStart
+// NewDecoder builds a new Decoder that uses given Parser to decode a Ruby Marshal stream.
+func NewDecoder(p *Parser) *Decoder {
+	return &Decoder{p: p}
+}
+
+// ReadValue will consume a full Ruby Marshal stream from the given io.Reader and return a fully decoded Golang object.
+func ReadValue(r io.Reader, val interface{}) error {
+	return NewDecoder(NewParser(r)).Decode(val)
+}
+
+func (d *Decoder) Decode(val interface{}) error {
+	v := reflect.ValueOf(val)
+	if v.Kind() != reflect.Ptr {
+		return fmt.Errorf("Invalid decode target %T, did you forget to pass a pointer?", val)
+	}
+
+	return d.valueDecoder(v.Elem())(d, v.Elem())
+}
+
+func (d *Decoder) nextToken() (Token, error) {
+	if d.curToken != tokenStart {
+		tok := d.curToken
+		d.curToken = tokenStart
 		return tok, nil
 	}
-	return p.Next()
+	return d.p.Next()
 }
 
-type decoderFunc func(*Parser, reflect.Value, *decodeContext) error
+type decoderFunc func(*Decoder, reflect.Value) error
 
-func (m *Mapper) valueDecoder(v reflect.Value) decoderFunc {
-	return m.typeDecoder(v.Type())
+var decCache struct {
+	sync.RWMutex
+	m map[reflect.Type]decoderFunc
 }
 
-func (m *Mapper) typeDecoder(t reflect.Type) decoderFunc {
-	m.decLock.RLock()
-	dec := m.decCache[t]
-	m.decLock.RUnlock()
+func (d *Decoder) valueDecoder(v reflect.Value) decoderFunc {
+	return d.typeDecoder(v.Type())
+}
+
+func (d *Decoder) typeDecoder(t reflect.Type) decoderFunc {
+	decCache.RLock()
+	dec := decCache.m[t]
+	decCache.RUnlock()
 	if dec != nil {
 		return dec
 	}
 
-	m.decLock.Lock()
-	defer m.decLock.Unlock()
-	if m.decCache == nil {
-		m.decCache = make(map[reflect.Type]decoderFunc)
+	decCache.Lock()
+	defer decCache.Unlock()
+	if decCache.m == nil {
+		decCache.m = make(map[reflect.Type]decoderFunc)
 	}
-	m.decCache[t] = newTypeDecoder(t)
-	return m.decCache[t]
+	decCache.m[t] = newTypeDecoder(t)
+	return decCache.m[t]
 }
 
 func newTypeDecoder(t reflect.Type) decoderFunc {
@@ -59,8 +88,8 @@ func newTypeDecoder(t reflect.Type) decoderFunc {
 	return unsupportedTypeDecoder
 }
 
-func boolDecoder(p *Parser, v reflect.Value, ctx *decodeContext) error {
-	tok, err := ctx.nextToken(p)
+func boolDecoder(d *Decoder, v reflect.Value) error {
+	tok, err := d.nextToken()
 	if err != nil {
 		return err
 	}
@@ -75,15 +104,15 @@ func boolDecoder(p *Parser, v reflect.Value, ctx *decodeContext) error {
 		return fmt.Errorf("Unexpected token %v encountered while decoding bool", tok)
 	}
 }
-func intDecoder(p *Parser, v reflect.Value, ctx *decodeContext) error {
-	tok, err := ctx.nextToken(p)
+func intDecoder(d *Decoder, v reflect.Value) error {
+	tok, err := d.nextToken()
 	if err != nil {
 		return err
 	}
 
 	switch tok {
 	case TokenFixnum:
-		n, err := p.Int()
+		n, err := d.p.Int()
 		if err != nil {
 			return err
 		}
@@ -97,15 +126,15 @@ func intDecoder(p *Parser, v reflect.Value, ctx *decodeContext) error {
 	}
 }
 
-func uintDecoder(p *Parser, v reflect.Value, ctx *decodeContext) error {
-	tok, err := ctx.nextToken(p)
+func uintDecoder(d *Decoder, v reflect.Value) error {
+	tok, err := d.nextToken()
 	if err != nil {
 		return err
 	}
 
 	switch tok {
 	case TokenFixnum:
-		n, err := p.Int()
+		n, err := d.p.Int()
 		if err != nil {
 			return err
 		}
@@ -120,15 +149,15 @@ func uintDecoder(p *Parser, v reflect.Value, ctx *decodeContext) error {
 	}
 }
 
-func floatDecoder(p *Parser, v reflect.Value, ctx *decodeContext) error {
-	tok, err := ctx.nextToken(p)
+func floatDecoder(d *Decoder, v reflect.Value) error {
+	tok, err := d.nextToken()
 	if err != nil {
 		return err
 	}
 
 	switch tok {
 	case TokenFloat:
-		f, err := p.Float()
+		f, err := d.p.Float()
 		if err != nil {
 			return err
 		}
@@ -142,15 +171,15 @@ func floatDecoder(p *Parser, v reflect.Value, ctx *decodeContext) error {
 	}
 }
 
-func stringDecoder(p *Parser, v reflect.Value, ctx *decodeContext) error {
-	tok, err := ctx.nextToken(p)
+func stringDecoder(d *Decoder, v reflect.Value) error {
+	tok, err := d.nextToken()
 	if err != nil {
 		return err
 	}
 
 	switch tok {
 	case TokenString, TokenSymbol:
-		str, err := p.Text()
+		str, err := d.p.Text()
 		if err != nil {
 			return err
 		}
@@ -165,8 +194,8 @@ type ptrDecoder struct {
 	elemDec decoderFunc
 }
 
-func (d *ptrDecoder) decode(p *Parser, v reflect.Value, ctx *decodeContext) error {
-	tok, err := ctx.nextToken(p)
+func (ptrDec *ptrDecoder) decode(d *Decoder, v reflect.Value) error {
+	tok, err := d.nextToken()
 	if err != nil {
 		return err
 	}
@@ -180,12 +209,12 @@ func (d *ptrDecoder) decode(p *Parser, v reflect.Value, ctx *decodeContext) erro
 	// TODO: if the token is a link, we dig up the cached reference and use that.
 
 	// Push the token back and decode against resolved ptr.
-	ctx.curToken = tok
+	d.curToken = tok
 
 	if v.IsNil() {
 		v.Set(reflect.New(v.Type().Elem()))
 	}
-	return d.elemDec(p, v.Elem(), ctx)
+	return ptrDec.elemDec(d, v.Elem())
 }
 
 func newPtrDecoder(t reflect.Type) decoderFunc {
@@ -193,6 +222,6 @@ func newPtrDecoder(t reflect.Type) decoderFunc {
 	return dec.decode
 }
 
-func unsupportedTypeDecoder(p *Parser, v reflect.Value, ctx *decodeContext) error {
+func unsupportedTypeDecoder(d *Decoder, v reflect.Value) error {
 	return fmt.Errorf("unsupported type %s", v.Type())
 }
