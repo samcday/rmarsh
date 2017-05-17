@@ -1,6 +1,7 @@
 package rmarsh
 
 import (
+	// "fmt"
 	"io"
 	"math/big"
 	"reflect"
@@ -82,36 +83,40 @@ type parserContext struct {
 
 // Parser is a low-level streaming implementation of the Ruby Marshal 4.8 format.
 type Parser struct {
-	r    io.Reader
-	cur  Token
+	// r is the Reader we are pulling the Marshal stream bytes from.
+	r io.Reader
+
+	// cur holds the token we have most recently parsed
+	cur Token
+
 	st   []parserContext
 	stSz int
 	cst  *parserContext
 
 	// The read buffer contains every bit of data that we've read for the stream.
 	buf []byte
-	pos uint
+	pos int
 
-	// ctx stores the data for the token we're currently at.
-	ctx []byte
+	curSt, curEnd int
 
-	num int64
+	num int
 
 	bnumbits []big.Word
 	bnumsign byte
 
-	// symTbl stores the offset+sizes of the discovered symbols in the read buffer.
-	symTbl [][2]uint
+	// Each entry of the symTbl is a tuple that holds the start + end position of the Symbol bytes in the read buffer.
+	// The symTbl begins at symTblInitSize, and doubles each time the capacity overflows.
+	symTbl [][2]int
 }
 
 // NewParser constructs a new parser that streams data from the given io.Reader
-// Due to the nature of the Marshal format, data is read in very small increments
-// please ensure that the provided Reader is buffered, or wrap it in a bufio.Reader.
+// Due to the nature of the Marshal format, data is read in very small increments please ensure that the provided Reader
+// is buffered, or wrap it in a bufio.Reader.
 func NewParser(r io.Reader) *Parser {
 	p := &Parser{
 		r:      r,
 		buf:    make([]byte, bufInitSize),
-		symTbl: make([][2]uint, symTblInitSize)[0:0],
+		symTbl: make([][2]int, symTblInitSize)[0:0],
 	}
 	return p
 }
@@ -200,8 +205,9 @@ func (p *Parser) Len() int {
 }
 
 // Int returns the value contained in the current Fixnum token.
+// A fixnum will not exceed an int32, so this method returns int.
 // Returns an error if called for any other type of token.
-func (p *Parser) Int() (int64, error) {
+func (p *Parser) Int() (int, error) {
 	if p.cur != TokenFixnum {
 		return 0, errors.Errorf("rmarsh.Parser.Int() called for wrong token: %s", p.cur)
 	}
@@ -219,7 +225,8 @@ func (p *Parser) Float() (float64, error) {
 	// Avoid some unnecessary allocations by constructing a raw string view over the bytes. This is safe because the
 	// fake string is not leaked outside of this method call - the bytes only need to stay constant for the call to
 	// strconv.ParseFloat.
-	bytesHeader := (*reflect.SliceHeader)(unsafe.Pointer(&p.ctx))
+	buf := p.buf[p.curSt:p.curEnd]
+	bytesHeader := (*reflect.SliceHeader)(unsafe.Pointer(&buf))
 	strHeader := reflect.StringHeader{Data: bytesHeader.Data, Len: bytesHeader.Len}
 	str := *(*string)(unsafe.Pointer(&strHeader))
 
@@ -238,7 +245,7 @@ func (p *Parser) Bignum() (big.Int, error) {
 		return big.Int{}, errors.Errorf("rmarsh.Parser.Bignum() called for wrong token: %s", p.cur)
 	}
 
-	wordsz := (len(p.ctx) + _S - 1) / _S
+	wordsz := (p.curEnd - p.curSt + _S - 1) / _S
 	if len(p.bnumbits) < wordsz {
 		p.bnumbits = make([]big.Word, wordsz)
 	}
@@ -247,14 +254,16 @@ func (p *Parser) Bignum() (big.Int, error) {
 	s := uint(0)
 	var d big.Word
 
-	for i := 0; i < len(p.ctx); i++ {
-		d |= big.Word(p.ctx[i]) << s
+	var i int
+	for pos := p.curSt; pos <= p.curEnd; pos++ {
+		d |= big.Word(p.buf[pos]) << s
 		if s += 8; s == _S*8 {
 			p.bnumbits[k] = d
 			k++
 			s = 0
 			d = 0
 		}
+		i++
 	}
 	if k < wordsz {
 		p.bnumbits[k] = d
@@ -273,7 +282,7 @@ func (p *Parser) Bignum() (big.Int, error) {
 // NOTE: The return byte slice is the one that is used internally, it will be modified on the next call to Next().
 // If any data needs to be kept, be sure to copy it out of the returned buffer.
 func (p *Parser) Bytes() []byte {
-	return p.ctx
+	return p.buf[p.curSt:p.curEnd]
 }
 
 // IVarName returns the name of the instance variable that is currently being parsed.
@@ -291,9 +300,9 @@ func (p *Parser) IVarName() (string, error) {
 func (p *Parser) Text() (string, error) {
 	switch p.cur {
 	case TokenBignum:
-		return string(p.bnumsign) + string(p.ctx), nil
+		return string(p.bnumsign) + string(p.buf[p.curSt:p.curEnd]), nil
 	case TokenFloat, TokenSymbol, TokenString:
-		return string(p.ctx), nil
+		return string(p.buf[p.curSt:p.curEnd]), nil
 	}
 	return "", errors.Errorf("rmarsh.Parser.Text() called for wrong token: %s", p.cur)
 }
@@ -302,24 +311,25 @@ func (p *Parser) adv() (err error) {
 	var typ byte
 
 	if p.cur == tokenStart {
-		if b, err := p.readbytes(3); err != nil {
+		if _, _, err := p.fill(3); err != nil {
 			return errors.Wrap(err, "reading magic")
-		} else if b[0] != 0x04 || b[1] != 0x08 {
-			return errors.Errorf("Expected magic header 0x0408, got 0x%.4X", int16(b[0])<<8|int16(b[1]))
+		} else if p.buf[0] != 0x04 || p.buf[1] != 0x08 {
+			return errors.Errorf("Expected magic header 0x0408, got 0x%.4X", int16(p.buf[0])<<8|int16(p.buf[1]))
 		} else {
 			// Silly little optimisation: we fetched 3 bytes on the first
 			// read since there is always at least one token to read.
 			// Saves a couple dozen nanos on them micro benchmarks. #winning #tigerblood
-			typ = b[2]
+			typ = p.buf[2]
 		}
 	} else {
-		typ, err = p.readbyte()
-		if err == io.EOF {
+		start, _, err := p.fill(1)
+		if err == io.ErrUnexpectedEOF {
 			p.cur = TokenEOF
 			return nil
 		} else if err != nil {
 			return errors.Wrap(err, "read type id")
 		}
+		typ = p.buf[start]
 	}
 
 	switch typ {
@@ -337,29 +347,30 @@ func (p *Parser) adv() (err error) {
 		}
 	case typeFloat:
 		p.cur = TokenFloat
-		if _, _, err := p.sizedBlob(false); err != nil {
+		if p.curSt, p.curEnd, err = p.sizedBlob(false); err != nil {
 			return errors.Wrap(err, "float")
 		}
 	case typeBignum:
 		p.cur = TokenBignum
-		p.bnumsign, err = p.readbyte()
+		start, _, err := p.fill(1)
 		if err != nil {
 			return errors.Wrap(err, "bignum")
 		}
+		p.bnumsign = p.buf[start]
 
-		if _, _, err := p.sizedBlob(true); err != nil {
+		if p.curSt, p.curEnd, err = p.sizedBlob(true); err != nil {
 			return errors.Wrap(err, "bignum")
 		}
 	case typeSymbol:
 		p.cur = TokenSymbol
-		start, end, err := p.sizedBlob(false)
+		p.curSt, p.curEnd, err = p.sizedBlob(false)
 		if err != nil {
 			return errors.Wrap(err, "symbol")
 		}
-		p.addSym(start, end)
+		p.addSym(p.curSt, p.curEnd)
 	case typeString:
 		p.cur = TokenString
-		if _, _, err := p.sizedBlob(false); err != nil {
+		if p.curSt, p.curEnd, err = p.sizedBlob(false); err != nil {
 			return errors.Wrap(err, "string")
 		}
 	case typeSymlink:
@@ -372,7 +383,7 @@ func (p *Parser) adv() (err error) {
 		if id >= len(p.symTbl) {
 			return errors.Errorf("Symlink id %d is larger than max known %d", id, len(p.symTbl)-1)
 		}
-		p.ctx = p.buf[p.symTbl[id][0]:p.symTbl[id][1]]
+		p.curSt, p.curEnd = p.symTbl[id][0], p.symTbl[id][1]
 	case typeArray:
 		p.cur = TokenStartArray
 		n, err := p.long()
@@ -409,7 +420,7 @@ func (p *Parser) advIVar() (Token, error) {
 	} else if p.cur != TokenSymbol {
 		return tokenStart, errors.Errorf("Unexpected token type %s while parsing IVar, expected Symbol", p.cur)
 	}
-	sym := string(p.ctx)
+	sym := string(p.buf[p.curSt:p.curEnd])
 	p.cst.ivSym = &sym
 
 	err := p.adv()
@@ -446,8 +457,8 @@ func (p *Parser) popStack() {
 // for the size and then the raw bytes. In most cases, interpreting those bytes
 // is relatively expensive - and the caller may not even care (just skips to the
 // next token). So, we save off the raw bytes and interpret them only when needed.
-func (p *Parser) sizedBlob(bnum bool) (start uint, end uint, err error) {
-	var sz int64
+func (p *Parser) sizedBlob(bnum bool) (start, end int, err error) {
+	var sz int
 	sz, err = p.long()
 	if err != nil {
 		return
@@ -460,13 +471,12 @@ func (p *Parser) sizedBlob(bnum bool) (start uint, end uint, err error) {
 		sz = sz * 2
 	}
 
-	p.ctx, err = p.readbytes(uint(sz))
-	end = p.pos
-	return
+	return p.fill(sz)
 }
 
-func (p *Parser) long() (int64, error) {
-	b, err := p.readbyte()
+func (p *Parser) long() (int, error) {
+	start, _, err := p.fill(1)
+	b := p.buf[start]
 	if err != nil {
 		return 0, err
 	}
@@ -478,71 +488,79 @@ func (p *Parser) long() (int64, error) {
 
 	if c > 0 {
 		if 4 < c && c < 128 {
-			return int64(c - 5), nil
+			return c - 5, nil
 		}
 
-		raw, err := p.readbytes(uint(c))
+		start, end, err := p.fill(c)
 		if err != nil {
 			return 0, err
 		}
-		var x int64
-		for i, v := range raw {
-			x |= int64(v) << uint(8*i)
+		var x int
+		var i int
+		for start <= end {
+			x |= int(p.buf[start]) << uint(8*i)
+			i++
+			start++
 		}
 		return x, nil
 	}
 
 	if -129 < c && c < -4 {
-		return int64(c + 5), nil
+		return c + 5, nil
 	}
 
 	c = -c
-	raw, err := p.readbytes(uint(c))
+	start, end, err := p.fill(c)
 	if err != nil {
 		return 0, err
 	}
-	x := int64(-1)
-	for i, v := range raw {
-		x &= ^(int64(0xff) << uint(8*i))
-		x |= int64(v) << uint(8*i)
+	x := -1
+	var i int
+	for start <= end {
+		x &= ^(0xff << uint(8*i))
+		x |= int(p.buf[start]) << uint(8*i)
+		i++
+		start++
 	}
 
 	return x, err
 }
 
-func (p *Parser) addSym(start, end uint) {
+func (p *Parser) addSym(start, end int) {
+	// We track the current parse sym table by slicing the underlying array.
+	// That is, if we've seen one symbol in the stream so far, len(p.symTbl) == 1 && cap(p.symTable) == symTblInitSize
+	// Once we exceed cap, we double size of the tbl.
 	if len(p.symTbl) == cap(p.symTbl) {
-		symTbl := make([][2]uint, cap(p.symTbl)*2)
+		symTbl := make([][2]int, cap(p.symTbl)*2)
 		copy(symTbl, p.symTbl)
 		p.symTbl = symTbl[0:]
 	}
-	// Grow symTbl len by 1
 	idx := len(p.symTbl)
 	p.symTbl = p.symTbl[0 : idx+1]
 	p.symTbl[idx][0], p.symTbl[idx][1] = start, end
 }
 
-func (p *Parser) readbyte() (byte, error) {
-	buf, err := p.readbytes(1)
-	if err != nil {
-		return 0, err
-	}
-	return buf[0], nil
-}
+// Pull bytes from the io.Reader into our read buffer.
+func (p *Parser) fill(num int) (start, end int, err error) {
+	start = p.pos
+	end = p.pos + num
 
-func (p *Parser) readbytes(num uint) ([]byte, error) {
-	if p.pos+num > uint(len(p.buf)) {
+	if end > len(p.buf) {
 		// Overflowed our read buffer, allocate a new one double the size,
 		buf := make([]byte, len(p.buf)*2)
 		copy(buf, p.buf)
 		p.buf = buf
 	}
-	b := p.buf[p.pos : p.pos+num]
-	if _, err := io.ReadFull(p.r, b); err == io.EOF {
-		return nil, err
-	} else if err != nil {
-		return nil, errors.Errorf("I/O error %q at position %d", err, p.pos)
+
+	var rd, n int
+	for rd < num && err == nil {
+		n, err = p.r.Read(p.buf[p.pos:end])
+		rd += n
+		p.pos += n
 	}
-	p.pos += num
-	return b, nil
+	// fmt.Printf("cunt %d %d\n", num, rd)
+	if err == io.EOF {
+		err = io.ErrUnexpectedEOF
+	}
+	return
 }

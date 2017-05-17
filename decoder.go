@@ -116,10 +116,11 @@ func intDecoder(d *Decoder, v reflect.Value) error {
 		if err != nil {
 			return err
 		}
-		if v.OverflowInt(n) {
+		nn := int64(n)
+		if v.OverflowInt(nn) {
 			return fmt.Errorf("Decoded int %d exceeds maximum width of %s", n, v.Type())
 		}
-		v.SetInt(n)
+		v.SetInt(nn)
 		return nil
 	default:
 		return fmt.Errorf("Unexpected token %v encountered while decoding int", tok)
