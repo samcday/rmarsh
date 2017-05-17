@@ -13,7 +13,7 @@ import (
 
 const (
 	bufInitSz    = 256 // Initial size of our read buffer. We double it each time we overflow available space.
-	rngTblInitSz = 8   // Initial size of symbol table entries
+	rngTblInitSz = 8   // Initial size of range table entries
 	stackGrowSz  = 8   // Amount to grow stack by when needed
 )
 
@@ -99,22 +99,42 @@ type Parser struct {
 	bnumbits []big.Word
 	bnumsign byte
 
-	symTbl []rng // Store ranges marking the symbols we've parsed in the read buffer.
-	lnkTbl []rng // Store ranges marking the linkable objects we've parsed in the read buffer.
+	symTbl rngTbl // Store ranges marking the symbols we've parsed in the read buffer.
+	lnkTbl rngTbl // Store ranges marking the linkable objects we've parsed in the read buffer.
 }
 
 // A range encodes a pair of start/end positions, used to mark interesting locations in the read buffer.
 type rng struct{ beg, end int }
 
+// Range table
+type rngTbl []rng
+
+func (t *rngTbl) add(r rng) (id int) {
+	// We track the current parse sym table by slicing the underlying array.
+	// That is, if we've seen one symbol in the stream so far, len(p.symTbl) == 1 && cap(p.symTable) == rngTblInitSz
+	// Once we exceed cap, we double size of the tbl.
+	id = len(*t)
+	if c := cap(*t); id == c {
+		if c == 0 {
+			c = rngTblInitSz
+		} else {
+			c = c * 2
+		}
+		newT := make([]rng, c)
+		copy(newT, *t)
+		*t = newT[0:id]
+	}
+	*t = append(*t, r)
+	return
+}
+
 // NewParser constructs a new parser that streams data from the given io.Reader
-// Due to the nature of the Marshal format, data is read in very small increments please ensure that the provided Reader
-// is buffered, or wrap it in a bufio.Reader.
+// Due to the nature of the Marshal format, data is read in very small increments. Please ensure that the provided
+// Reader is buffered, or wrap it in a bufio.Reader.
 func NewParser(r io.Reader) *Parser {
 	p := &Parser{
-		r:      r,
-		buf:    make([]byte, bufInitSz),
-		symTbl: make([]rng, rngTblInitSz)[0:0],
-		lnkTbl: make([]rng, rngTblInitSz)[0:0],
+		r:   r,
+		buf: make([]byte, bufInitSz),
 	}
 	return p
 }
@@ -129,6 +149,7 @@ func (p *Parser) Reset(r io.Reader) {
 	p.cur = tokenStart
 	p.stSz = 0
 	p.symTbl = p.symTbl[0:0]
+	p.lnkTbl = p.lnkTbl[0:0]
 }
 
 // Next advances the parser to the next token in the stream.
@@ -200,6 +221,19 @@ func (p *Parser) Len() int {
 	}
 
 	return p.cst.sz
+}
+
+// LinkId returns the id number for the current link value, or the expected link id for a linkable value.
+// Only valid for the first token of linkable values such as TokenFloat, TokenString, TokenStartHash, TokenStartArray,
+// etc. Returns -1 for anything else.
+func (p *Parser) LinkId() int {
+	switch p.cur {
+	case TokenLink:
+		return p.num
+	case TokenFloat, TokenStartArray:
+		return len(p.lnkTbl) - 1
+	}
+	return -1
 }
 
 // Int returns the value contained in the current Fixnum token.
@@ -306,7 +340,7 @@ func (p *Parser) Text() (string, error) {
 }
 
 func (p *Parser) adv() (err error) {
-	var typ byte
+	var r rng
 
 	if p.cur == tokenStart {
 		if _, err := p.fill(3); err != nil {
@@ -314,23 +348,21 @@ func (p *Parser) adv() (err error) {
 		} else if p.buf[0] != 0x04 || p.buf[1] != 0x08 {
 			return errors.Errorf("Expected magic header 0x0408, got 0x%.4X", int16(p.buf[0])<<8|int16(p.buf[1]))
 		} else {
-			// Silly little optimisation: we fetched 3 bytes on the first
-			// read since there is always at least one token to read.
-			// Saves a couple dozen nanos on them micro benchmarks. #winning #tigerblood
-			typ = p.buf[2]
+			// Minor optimisation: we fetched 3 bytes on the first read since there is always at least one token to read.
+			r.beg = 2
 		}
 	} else {
-		r, err := p.fill(1)
+		r.beg = p.pos
+		_, err := p.fill(1)
 		if err == io.ErrUnexpectedEOF {
 			p.cur = TokenEOF
 			return nil
 		} else if err != nil {
 			return errors.Wrap(err, "read type id")
 		}
-		typ = p.buf[r.beg]
 	}
 
-	switch typ {
+	switch p.buf[r.beg] {
 	case typeNil:
 		p.cur = TokenNil
 	case typeTrue:
@@ -348,6 +380,8 @@ func (p *Parser) adv() (err error) {
 		if p.ctx, err = p.sizedBlob(false); err != nil {
 			return errors.Wrap(err, "float")
 		}
+		r.end = p.pos
+		p.lnkTbl.add(r)
 	case typeBignum:
 		p.cur = TokenBignum
 		r, err := p.fill(1)
@@ -365,7 +399,7 @@ func (p *Parser) adv() (err error) {
 		if err != nil {
 			return errors.Wrap(err, "symbol")
 		}
-		p.addSym(p.ctx)
+		p.symTbl.add(p.ctx)
 	case typeString:
 		p.cur = TokenString
 		if p.ctx, err = p.sizedBlob(false); err != nil {
@@ -389,6 +423,7 @@ func (p *Parser) adv() (err error) {
 			return errors.Wrap(err, "array")
 		}
 		p.pushStack(ctxArray, int(n))
+		p.lnkTbl.add(r)
 	case typeHash:
 		p.cur = TokenStartHash
 		n, err := p.long()
@@ -399,6 +434,12 @@ func (p *Parser) adv() (err error) {
 	case typeIvar:
 		p.cur = TokenStartIVar
 		p.pushStack(ctxIVar, -1)
+	case typeLink:
+		p.cur = TokenLink
+		p.num, err = p.long()
+		if err != nil {
+			return errors.Wrap(err, "link")
+		}
 	}
 
 	return nil
@@ -518,18 +559,6 @@ func (p *Parser) long() (n int, err error) {
 	}
 
 	return
-}
-
-func (p *Parser) addSym(r rng) {
-	// We track the current parse sym table by slicing the underlying array.
-	// That is, if we've seen one symbol in the stream so far, len(p.symTbl) == 1 && cap(p.symTable) == rngTblInitSz
-	// Once we exceed cap, we double size of the tbl.
-	if len(p.symTbl) == cap(p.symTbl) {
-		symTbl := make([]rng, cap(p.symTbl)*2)
-		copy(symTbl, p.symTbl)
-		p.symTbl = symTbl[0:]
-	}
-	p.symTbl = append(p.symTbl, r)
 }
 
 // Pull bytes from the io.Reader into our read buffer.
