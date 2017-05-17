@@ -11,10 +11,9 @@ import (
 )
 
 const (
-	bufSize        = 64   // Initial size of our read buffer
-	symTblInitSize = 32   // Initial size of symbol table
-	symTblMaxInc   = 1024 // Symbol table is doubled in size whenever space is exceeded, increment is capped at this num.
-	stackGrowSize  = 8    // Amount to grow stack by when needed
+	bufInitSize    = 256 // Initial size of our read buffer. We double it each time we overflow available space.
+	symTblInitSize = 8   // Initial size of symbol table entries
+	stackGrowSize  = 8   // Amount to grow stack by when needed
 )
 
 // A Token represents a single distinct value type read from a Parser instance.
@@ -85,12 +84,15 @@ type parserContext struct {
 type Parser struct {
 	r    io.Reader
 	cur  Token
-	pos  uint64
 	st   []parserContext
 	stSz int
 	cst  *parserContext
 
+	// The read buffer contains every bit of data that we've read for the stream.
 	buf []byte
+	pos uint
+
+	// ctx stores the data for the token we're currently at.
 	ctx []byte
 
 	num int64
@@ -98,16 +100,19 @@ type Parser struct {
 	bnumbits []big.Word
 	bnumsign byte
 
-	symTbl symTable
+	// symTbl stores the offset+sizes of the discovered symbols in the read buffer.
+	symTbl [][2]uint
 }
 
 // NewParser constructs a new parser that streams data from the given io.Reader
 // Due to the nature of the Marshal format, data is read in very small increments
 // please ensure that the provided Reader is buffered, or wrap it in a bufio.Reader.
 func NewParser(r io.Reader) *Parser {
-	p := &Parser{r: r, buf: make([]byte, bufSize)}
-	p.symTbl.off = make([]int, 8)
-	p.symTbl.sz = make([]int, 8)
+	p := &Parser{
+		r:      r,
+		buf:    make([]byte, bufInitSize),
+		symTbl: make([][2]uint, symTblInitSize)[0:0],
+	}
 	return p
 }
 
@@ -120,7 +125,7 @@ func (p *Parser) Reset(r io.Reader) {
 	p.pos = 0
 	p.cur = tokenStart
 	p.stSz = 0
-	p.symTbl.reset()
+	p.symTbl = p.symTbl[0:0]
 }
 
 // Next advances the parser to the next token in the stream.
@@ -332,7 +337,7 @@ func (p *Parser) adv() (err error) {
 		}
 	case typeFloat:
 		p.cur = TokenFloat
-		if err := p.sizedBlob(false); err != nil {
+		if _, _, err := p.sizedBlob(false); err != nil {
 			return errors.Wrap(err, "float")
 		}
 	case typeBignum:
@@ -342,18 +347,19 @@ func (p *Parser) adv() (err error) {
 			return errors.Wrap(err, "bignum")
 		}
 
-		if err := p.sizedBlob(true); err != nil {
+		if _, _, err := p.sizedBlob(true); err != nil {
 			return errors.Wrap(err, "bignum")
 		}
 	case typeSymbol:
 		p.cur = TokenSymbol
-		if err := p.sizedBlob(false); err != nil {
+		start, end, err := p.sizedBlob(false)
+		if err != nil {
 			return errors.Wrap(err, "symbol")
 		}
-		p.symTbl.add(p.ctx)
+		p.addSym(start, end)
 	case typeString:
 		p.cur = TokenString
-		if err := p.sizedBlob(false); err != nil {
+		if _, _, err := p.sizedBlob(false); err != nil {
 			return errors.Wrap(err, "string")
 		}
 	case typeSymlink:
@@ -363,10 +369,10 @@ func (p *Parser) adv() (err error) {
 			return errors.Wrap(err, "symlink id")
 		}
 		id := int(n)
-		if id >= p.symTbl.num {
-			return errors.Errorf("Symlink id %d is larger than max known %d", id, p.symTbl.num-1)
+		if id >= len(p.symTbl) {
+			return errors.Errorf("Symlink id %d is larger than max known %d", id, len(p.symTbl)-1)
 		}
-		p.ctx = p.symTbl.get(id)
+		p.ctx = p.buf[p.symTbl[id][0]:p.symTbl[id][1]]
 	case typeArray:
 		p.cur = TokenStartArray
 		n, err := p.long()
@@ -440,19 +446,23 @@ func (p *Parser) popStack() {
 // for the size and then the raw bytes. In most cases, interpreting those bytes
 // is relatively expensive - and the caller may not even care (just skips to the
 // next token). So, we save off the raw bytes and interpret them only when needed.
-func (p *Parser) sizedBlob(bnum bool) error {
-	sz, err := p.long()
+func (p *Parser) sizedBlob(bnum bool) (start uint, end uint, err error) {
+	var sz int64
+	sz, err = p.long()
 	if err != nil {
-		return err
+		return
 	}
+
+	start = p.pos
 
 	// For some stupid reason bignums store the length in shorts, not bytes.
 	if bnum {
 		sz = sz * 2
 	}
 
-	p.ctx, err = p.readbytes(uint64(sz))
-	return err
+	p.ctx, err = p.readbytes(uint(sz))
+	end = p.pos
+	return
 }
 
 func (p *Parser) long() (int64, error) {
@@ -471,7 +481,7 @@ func (p *Parser) long() (int64, error) {
 			return int64(c - 5), nil
 		}
 
-		raw, err := p.readbytes(uint64(c))
+		raw, err := p.readbytes(uint(c))
 		if err != nil {
 			return 0, err
 		}
@@ -487,7 +497,7 @@ func (p *Parser) long() (int64, error) {
 	}
 
 	c = -c
-	raw, err := p.readbytes(uint64(c))
+	raw, err := p.readbytes(uint(c))
 	if err != nil {
 		return 0, err
 	}
@@ -500,6 +510,18 @@ func (p *Parser) long() (int64, error) {
 	return x, err
 }
 
+func (p *Parser) addSym(start, end uint) {
+	if len(p.symTbl) == cap(p.symTbl) {
+		symTbl := make([][2]uint, cap(p.symTbl)*2)
+		copy(symTbl, p.symTbl)
+		p.symTbl = symTbl[0:]
+	}
+	// Grow symTbl len by 1
+	idx := len(p.symTbl)
+	p.symTbl = p.symTbl[0 : idx+1]
+	p.symTbl[idx][0], p.symTbl[idx][1] = start, end
+}
+
 func (p *Parser) readbyte() (byte, error) {
 	buf, err := p.readbytes(1)
 	if err != nil {
@@ -508,11 +530,14 @@ func (p *Parser) readbyte() (byte, error) {
 	return buf[0], nil
 }
 
-func (p *Parser) readbytes(num uint64) ([]byte, error) {
-	if uint64(cap(p.buf)) < num {
-		p.buf = make([]byte, num)
+func (p *Parser) readbytes(num uint) ([]byte, error) {
+	if p.pos+num > uint(len(p.buf)) {
+		// Overflowed our read buffer, allocate a new one double the size,
+		buf := make([]byte, len(p.buf)*2)
+		copy(buf, p.buf)
+		p.buf = buf
 	}
-	b := p.buf[:num]
+	b := p.buf[p.pos : p.pos+num]
 	if _, err := io.ReadFull(p.r, b); err == io.EOF {
 		return nil, err
 	} else if err != nil {
@@ -520,53 +545,4 @@ func (p *Parser) readbytes(num uint64) ([]byte, error) {
 	}
 	p.pos += num
 	return b, nil
-}
-
-// Stores symbols in a single dimension byte array with lookups for offset+lengths.
-// Reduces amount of on-heap allocations.
-type symTable struct {
-	data []byte
-	off  []int
-	sz   []int
-	num  int
-	pos  int
-}
-
-func (t *symTable) get(id int) []byte {
-	return t.data[t.off[id] : t.off[id]+t.sz[id]]
-}
-
-func (t *symTable) add(sym []byte) {
-	if len(t.off) == t.num {
-		newOff := make([]int, len(t.off)*2)
-		copy(newOff, t.off)
-		t.off = newOff
-		newSz := make([]int, len(t.off)*2)
-		copy(newSz, t.sz)
-		t.sz = newSz
-	}
-
-	if t.pos+len(sym) < len(t.data) {
-		incr := len(t.data)
-		if incr > symTblMaxInc {
-			incr = symTblMaxInc
-		}
-		if incr < len(sym) {
-			incr = len(sym)
-		}
-		newData := make([]byte, len(t.data)+incr)
-		copy(newData, t.data)
-		t.data = newData
-	}
-
-	n := copy(t.data[t.pos:], sym)
-	t.off[t.num] = t.pos
-	t.sz[t.num] = n
-	t.pos += n
-	t.num++
-}
-
-func (t *symTable) reset() {
-	t.num = 0
-	t.pos = 0
 }
