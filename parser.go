@@ -106,7 +106,22 @@ type Parser struct {
 
 	// Each entry of the symTbl is a tuple that holds the start + end position of the Symbol bytes in the read buffer.
 	// The symTbl begins at symTblInitSize, and doubles each time the capacity overflows.
-	symTbl [][2]int
+	symTbl []symTblItem
+}
+
+type symTblItem [2]int
+
+func (i symTblItem) start() int {
+	return i[0]
+}
+func (i symTblItem) end() int {
+	return i[1]
+}
+func (i symTblItem) rng() (int, int) {
+	return i[0], i[1]
+}
+func (i *symTblItem) set(start, end int) {
+	i[0], i[1] = start, end
 }
 
 // NewParser constructs a new parser that streams data from the given io.Reader
@@ -116,7 +131,7 @@ func NewParser(r io.Reader) *Parser {
 	p := &Parser{
 		r:      r,
 		buf:    make([]byte, bufInitSize),
-		symTbl: make([][2]int, symTblInitSize)[0:0],
+		symTbl: make([]symTblItem, symTblInitSize)[0:0],
 	}
 	return p
 }
@@ -383,7 +398,7 @@ func (p *Parser) adv() (err error) {
 		if id >= len(p.symTbl) {
 			return errors.Errorf("Symlink id %d is larger than max known %d", id, len(p.symTbl)-1)
 		}
-		p.curSt, p.curEnd = p.symTbl[id][0], p.symTbl[id][1]
+		p.curSt, p.curEnd = p.symTbl[id].rng()
 	case typeArray:
 		p.cur = TokenStartArray
 		n, err := p.long()
@@ -533,13 +548,11 @@ func (p *Parser) addSym(start, end int) {
 	// That is, if we've seen one symbol in the stream so far, len(p.symTbl) == 1 && cap(p.symTable) == symTblInitSize
 	// Once we exceed cap, we double size of the tbl.
 	if len(p.symTbl) == cap(p.symTbl) {
-		symTbl := make([][2]int, cap(p.symTbl)*2)
+		symTbl := make([]symTblItem, cap(p.symTbl)*2)
 		copy(symTbl, p.symTbl)
 		p.symTbl = symTbl[0:]
 	}
-	idx := len(p.symTbl)
-	p.symTbl = p.symTbl[0 : idx+1]
-	p.symTbl[idx][0], p.symTbl[idx][1] = start, end
+	p.symTbl = append(p.symTbl, symTblItem{start, end})
 }
 
 // Pull bytes from the io.Reader into our read buffer.
