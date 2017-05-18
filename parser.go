@@ -12,9 +12,9 @@ import (
 )
 
 const (
-	bufInitSize    = 256 // Initial size of our read buffer. We double it each time we overflow available space.
-	symTblInitSize = 8   // Initial size of symbol table entries
-	stackGrowSize  = 8   // Amount to grow stack by when needed
+	bufInitSz    = 256 // Initial size of our read buffer. We double it each time we overflow available space.
+	rngTblInitSz = 8   // Initial size of symbol table entries
+	stackGrowSz  = 8   // Amount to grow stack by when needed
 )
 
 // A Token represents a single distinct value type read from a Parser instance.
@@ -83,46 +83,28 @@ type parserContext struct {
 
 // Parser is a low-level streaming implementation of the Ruby Marshal 4.8 format.
 type Parser struct {
-	// r is the Reader we are pulling the Marshal stream bytes from.
-	r io.Reader
+	r io.Reader // Where we are pulling the Marshal stream bytes from
 
-	// cur holds the token we have most recently parsed
-	cur Token
+	cur Token // The token we have most recently parsed
 
 	st   []parserContext
 	stSz int
 	cst  *parserContext
 
-	// The read buffer contains every bit of data that we've read for the stream.
-	buf []byte
-	pos int
+	buf []byte // The read buffer contains every bit of data that we've read for the stream.
+	pos int    // Our write position in the read buffer
+	ctx rng    // Range of the raw data for the current token
 
-	curSt, curEnd int
-
-	num int
-
+	num      int
 	bnumbits []big.Word
 	bnumsign byte
 
-	// Each entry of the symTbl is a tuple that holds the start + end position of the Symbol bytes in the read buffer.
-	// The symTbl begins at symTblInitSize, and doubles each time the capacity overflows.
-	symTbl []symTblItem
+	symTbl []rng // Store ranges marking the symbols we've parsed in the read buffer.
+	lnkTbl []rng // Store ranges marking the linkable objects we've parsed in the read buffer.
 }
 
-type symTblItem [2]int
-
-func (i symTblItem) start() int {
-	return i[0]
-}
-func (i symTblItem) end() int {
-	return i[1]
-}
-func (i symTblItem) rng() (int, int) {
-	return i[0], i[1]
-}
-func (i *symTblItem) set(start, end int) {
-	i[0], i[1] = start, end
-}
+// A range encodes a pair of start/end positions, used to mark interesting locations in the read buffer.
+type rng struct{ beg, end int }
 
 // NewParser constructs a new parser that streams data from the given io.Reader
 // Due to the nature of the Marshal format, data is read in very small increments please ensure that the provided Reader
@@ -130,8 +112,9 @@ func (i *symTblItem) set(start, end int) {
 func NewParser(r io.Reader) *Parser {
 	p := &Parser{
 		r:      r,
-		buf:    make([]byte, bufInitSize),
-		symTbl: make([]symTblItem, symTblInitSize)[0:0],
+		buf:    make([]byte, bufInitSz),
+		symTbl: make([]rng, rngTblInitSz)[0:0],
+		lnkTbl: make([]rng, rngTblInitSz)[0:0],
 	}
 	return p
 }
@@ -240,7 +223,7 @@ func (p *Parser) Float() (float64, error) {
 	// Avoid some unnecessary allocations by constructing a raw string view over the bytes. This is safe because the
 	// fake string is not leaked outside of this method call - the bytes only need to stay constant for the call to
 	// strconv.ParseFloat.
-	buf := p.buf[p.curSt:p.curEnd]
+	buf := p.buf[p.ctx.beg:p.ctx.end]
 	bytesHeader := (*reflect.SliceHeader)(unsafe.Pointer(&buf))
 	strHeader := reflect.StringHeader{Data: bytesHeader.Data, Len: bytesHeader.Len}
 	str := *(*string)(unsafe.Pointer(&strHeader))
@@ -260,7 +243,7 @@ func (p *Parser) Bignum() (big.Int, error) {
 		return big.Int{}, errors.Errorf("rmarsh.Parser.Bignum() called for wrong token: %s", p.cur)
 	}
 
-	wordsz := (p.curEnd - p.curSt + _S - 1) / _S
+	wordsz := (p.ctx.end - p.ctx.beg + _S - 1) / _S
 	if len(p.bnumbits) < wordsz {
 		p.bnumbits = make([]big.Word, wordsz)
 	}
@@ -270,7 +253,7 @@ func (p *Parser) Bignum() (big.Int, error) {
 	var d big.Word
 
 	var i int
-	for pos := p.curSt; pos <= p.curEnd; pos++ {
+	for pos := p.ctx.beg; pos <= p.ctx.end; pos++ {
 		d |= big.Word(p.buf[pos]) << s
 		if s += 8; s == _S*8 {
 			p.bnumbits[k] = d
@@ -297,7 +280,7 @@ func (p *Parser) Bignum() (big.Int, error) {
 // NOTE: The return byte slice is the one that is used internally, it will be modified on the next call to Next().
 // If any data needs to be kept, be sure to copy it out of the returned buffer.
 func (p *Parser) Bytes() []byte {
-	return p.buf[p.curSt:p.curEnd]
+	return p.buf[p.ctx.beg:p.ctx.end]
 }
 
 // IVarName returns the name of the instance variable that is currently being parsed.
@@ -315,9 +298,9 @@ func (p *Parser) IVarName() (string, error) {
 func (p *Parser) Text() (string, error) {
 	switch p.cur {
 	case TokenBignum:
-		return string(p.bnumsign) + string(p.buf[p.curSt:p.curEnd]), nil
+		return string(p.bnumsign) + string(p.buf[p.ctx.beg:p.ctx.end]), nil
 	case TokenFloat, TokenSymbol, TokenString:
-		return string(p.buf[p.curSt:p.curEnd]), nil
+		return string(p.buf[p.ctx.beg:p.ctx.end]), nil
 	}
 	return "", errors.Errorf("rmarsh.Parser.Text() called for wrong token: %s", p.cur)
 }
@@ -326,7 +309,7 @@ func (p *Parser) adv() (err error) {
 	var typ byte
 
 	if p.cur == tokenStart {
-		if _, _, err := p.fill(3); err != nil {
+		if _, err := p.fill(3); err != nil {
 			return errors.Wrap(err, "reading magic")
 		} else if p.buf[0] != 0x04 || p.buf[1] != 0x08 {
 			return errors.Errorf("Expected magic header 0x0408, got 0x%.4X", int16(p.buf[0])<<8|int16(p.buf[1]))
@@ -337,14 +320,14 @@ func (p *Parser) adv() (err error) {
 			typ = p.buf[2]
 		}
 	} else {
-		start, _, err := p.fill(1)
+		r, err := p.fill(1)
 		if err == io.ErrUnexpectedEOF {
 			p.cur = TokenEOF
 			return nil
 		} else if err != nil {
 			return errors.Wrap(err, "read type id")
 		}
-		typ = p.buf[start]
+		typ = p.buf[r.beg]
 	}
 
 	switch typ {
@@ -362,30 +345,30 @@ func (p *Parser) adv() (err error) {
 		}
 	case typeFloat:
 		p.cur = TokenFloat
-		if p.curSt, p.curEnd, err = p.sizedBlob(false); err != nil {
+		if p.ctx, err = p.sizedBlob(false); err != nil {
 			return errors.Wrap(err, "float")
 		}
 	case typeBignum:
 		p.cur = TokenBignum
-		start, _, err := p.fill(1)
+		r, err := p.fill(1)
 		if err != nil {
 			return errors.Wrap(err, "bignum")
 		}
-		p.bnumsign = p.buf[start]
+		p.bnumsign = p.buf[r.beg]
 
-		if p.curSt, p.curEnd, err = p.sizedBlob(true); err != nil {
+		if p.ctx, err = p.sizedBlob(true); err != nil {
 			return errors.Wrap(err, "bignum")
 		}
 	case typeSymbol:
 		p.cur = TokenSymbol
-		p.curSt, p.curEnd, err = p.sizedBlob(false)
+		p.ctx, err = p.sizedBlob(false)
 		if err != nil {
 			return errors.Wrap(err, "symbol")
 		}
-		p.addSym(p.curSt, p.curEnd)
+		p.addSym(p.ctx)
 	case typeString:
 		p.cur = TokenString
-		if p.curSt, p.curEnd, err = p.sizedBlob(false); err != nil {
+		if p.ctx, err = p.sizedBlob(false); err != nil {
 			return errors.Wrap(err, "string")
 		}
 	case typeSymlink:
@@ -398,7 +381,7 @@ func (p *Parser) adv() (err error) {
 		if id >= len(p.symTbl) {
 			return errors.Errorf("Symlink id %d is larger than max known %d", id, len(p.symTbl)-1)
 		}
-		p.curSt, p.curEnd = p.symTbl[id].rng()
+		p.ctx = p.symTbl[id]
 	case typeArray:
 		p.cur = TokenStartArray
 		n, err := p.long()
@@ -435,7 +418,7 @@ func (p *Parser) advIVar() (Token, error) {
 	} else if p.cur != TokenSymbol {
 		return tokenStart, errors.Errorf("Unexpected token type %s while parsing IVar, expected Symbol", p.cur)
 	}
-	sym := string(p.buf[p.curSt:p.curEnd])
+	sym := string(p.buf[p.ctx.beg:p.ctx.end])
 	p.cst.ivSym = &sym
 
 	err := p.adv()
@@ -445,7 +428,7 @@ func (p *Parser) advIVar() (Token, error) {
 func (p *Parser) pushStack(typ uint8, sz int) {
 	// Grow stack if needed
 	if l := len(p.st); p.stSz == l {
-		newStack := make([]parserContext, l+stackGrowSize)
+		newStack := make([]parserContext, l+stackGrowSz)
 		copy(newStack, p.st)
 		p.st = newStack
 	}
@@ -472,14 +455,12 @@ func (p *Parser) popStack() {
 // for the size and then the raw bytes. In most cases, interpreting those bytes
 // is relatively expensive - and the caller may not even care (just skips to the
 // next token). So, we save off the raw bytes and interpret them only when needed.
-func (p *Parser) sizedBlob(bnum bool) (start, end int, err error) {
+func (p *Parser) sizedBlob(bnum bool) (r rng, err error) {
 	var sz int
 	sz, err = p.long()
 	if err != nil {
 		return
 	}
-
-	start = p.pos
 
 	// For some stupid reason bignums store the length in shorts, not bytes.
 	if bnum {
@@ -490,77 +471,73 @@ func (p *Parser) sizedBlob(bnum bool) (start, end int, err error) {
 }
 
 func (p *Parser) long() (n int, err error) {
-	_, _, err = p.fill(1)
+	_, err = p.fill(1)
 	if err != nil {
 		return
 	}
 
 	n = int(p.buf[p.pos-1])
 	if n == 0 {
-		return 0, nil
-	}
-
-	if -129 < n && n < -4 {
+		return
+	} else if 4 < n && n < 128 {
+		n = n - 5
+		return
+	} else if -129 < n && n < -4 {
 		n = n + 5
 		return
 	}
 
-	var pos, end int
+	var r rng
 
 	if n > 0 {
-		if 4 < n && n < 128 {
-			n = n - 5
-			return
-		}
-
-		pos, end, err = p.fill(n)
+		r, err = p.fill(n)
 		if err != nil {
 			return
 		}
 		n = 0
 		var i int
-		for pos <= end {
-			n |= int(p.buf[pos]) << uint(8*i)
+		for r.beg <= r.end {
+			n |= int(p.buf[r.beg]) << uint(8*i)
 			i++
-			pos++
+			r.beg++
 		}
 		return
 	}
 
-	pos, end, err = p.fill(-n)
+	r, err = p.fill(-n)
 	if err != nil {
 		return
 	}
 	n = -1
 	var i int
-	for pos <= end {
+	for r.beg <= r.end {
 		n &= ^(0xff << uint(8*i))
-		n |= int(p.buf[pos]) << uint(8*i)
+		n |= int(p.buf[r.beg]) << uint(8*i)
 		i++
-		pos++
+		r.beg++
 	}
 
 	return
 }
 
-func (p *Parser) addSym(start, end int) {
+func (p *Parser) addSym(r rng) {
 	// We track the current parse sym table by slicing the underlying array.
-	// That is, if we've seen one symbol in the stream so far, len(p.symTbl) == 1 && cap(p.symTable) == symTblInitSize
+	// That is, if we've seen one symbol in the stream so far, len(p.symTbl) == 1 && cap(p.symTable) == rngTblInitSz
 	// Once we exceed cap, we double size of the tbl.
 	if len(p.symTbl) == cap(p.symTbl) {
-		symTbl := make([]symTblItem, cap(p.symTbl)*2)
+		symTbl := make([]rng, cap(p.symTbl)*2)
 		copy(symTbl, p.symTbl)
 		p.symTbl = symTbl[0:]
 	}
-	p.symTbl = append(p.symTbl, symTblItem{start, end})
+	p.symTbl = append(p.symTbl, r)
 }
 
 // Pull bytes from the io.Reader into our read buffer.
-func (p *Parser) fill(num int) (start, end int, err error) {
-	start = p.pos
-	end = p.pos + num
+func (p *Parser) fill(num int) (r rng, err error) {
+	r.beg = p.pos
+	r.end = p.pos + num
 
-	if end > len(p.buf) {
+	if r.end > len(p.buf) {
 		// Overflowed our read buffer, allocate a new one double the size,
 		buf := make([]byte, len(p.buf)*2)
 		copy(buf, p.buf)
@@ -569,7 +546,7 @@ func (p *Parser) fill(num int) (start, end int, err error) {
 
 	var rd, n int
 	for rd < num && err == nil {
-		n, err = p.r.Read(p.buf[p.pos:end])
+		n, err = p.r.Read(p.buf[p.pos:r.end])
 		rd += n
 		p.pos += n
 	}
