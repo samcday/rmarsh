@@ -1,7 +1,6 @@
 package rmarsh
 
 import (
-	// "fmt"
 	"io"
 	"math/big"
 	"reflect"
@@ -14,7 +13,7 @@ import (
 const (
 	bufInitSz    = 256 // Initial size of our read buffer. We double it each time we overflow available space.
 	rngTblInitSz = 8   // Initial size of range table entries
-	stackGrowSz  = 8   // Amount to grow stack by when needed
+	stackInitSz  = 8   // Initial size of stack
 )
 
 // A Token represents a single distinct value type read from a Parser instance.
@@ -38,6 +37,7 @@ const (
 	TokenStartIVar
 	TokenEndIVar
 	TokenLink
+	TokenEndReplay
 	TokenEOF
 )
 
@@ -57,6 +57,7 @@ var tokenNames = map[Token]string{
 	TokenStartIVar:  "TokenStartIVar",
 	TokenEndIVar:    "TokenEndIVar",
 	TokenLink:       "TokenLink",
+	TokenEndReplay:  "TokenEndReplay",
 	TokenEOF:        "EOF",
 }
 
@@ -67,29 +68,13 @@ func (t Token) String() string {
 	return "UNKNOWN"
 }
 
-const (
-	ctxArray = iota
-	ctxHash
-	ctxIVar
-)
-
-type parserContext struct {
-	typ uint8
-	sz  int
-	pos int
-
-	ivSym *string // If current context is an IVar, then this will contain the instance variable name
-}
-
 // Parser is a low-level streaming implementation of the Ruby Marshal 4.8 format.
 type Parser struct {
 	r io.Reader // Where we are pulling the Marshal stream bytes from
 
 	cur Token // The token we have most recently parsed
 
-	st   []parserContext
-	stSz int
-	cst  *parserContext
+	st parserStack
 
 	buf []byte // The read buffer contains every bit of data that we've read for the stream.
 	pos int    // Our write position in the read buffer
@@ -128,6 +113,61 @@ func (t *rngTbl) add(r rng) (id int) {
 	return
 }
 
+// parserCtx tracks the current state we're processing when handling complex values like arrays, hashes, ivars,  etc.
+// Multiple contexts can be nested in a stack. For example if we're parsing a hash as the nth element of an array,
+// then the top of the stack will be ctxHash and the stack item below that will be ctxArray
+type parserCtx struct {
+	typ uint8
+	sz  int
+	pos int
+
+	ivSym *string // If current context is an IVar, then this will contain the instance variable name
+
+	// Used when current context is ctxReplay
+	id int
+}
+
+// The valid context types
+const (
+	ctxArray  = iota // these should
+	ctxHash          // all be
+	ctxIVar          // mostly self explanatory.
+	ctxReplay        // this one is special and tracks when we've backtracked the parser into a previous value.
+)
+
+type parserStack []parserCtx
+
+func (stk parserStack) cur() *parserCtx {
+	if len(stk) == 0 {
+		return nil
+	}
+	return &stk[len(stk)-1]
+}
+
+func (stk *parserStack) push(typ uint8, sz int) *parserCtx {
+	// We track the current parse sym table by slicing the underlying array.
+	// That is, if we've seen one symbol in the stream so far, len(p.symTbl) == 1 && cap(p.symTable) == rngTblInitSz
+	// Once we exceed cap, we double size of the tbl.
+	l := len(*stk)
+	if c := cap(*stk); l == c {
+		if c == 0 {
+			c = stackInitSz
+		} else {
+			c = c * 2
+		}
+		newStk := make([]parserCtx, c)
+		copy(newStk, *stk)
+		*stk = newStk[0:l]
+	}
+
+	*stk = append(*stk, parserCtx{typ: typ, sz: sz})
+	return &(*stk)[l]
+}
+
+func (stk *parserStack) pop() {
+	*stk = (*stk)[0 : len(*stk)-1]
+}
+
 // NewParser constructs a new parser that streams data from the given io.Reader
 // Due to the nature of the Marshal format, data is read in very small increments. Please ensure that the provided
 // Reader is buffered, or wrap it in a bufio.Reader.
@@ -147,7 +187,7 @@ func (p *Parser) Reset(r io.Reader) {
 	}
 	p.pos = 0
 	p.cur = tokenStart
-	p.stSz = 0
+	p.st = p.st[0:0]
 	p.symTbl = p.symTbl[0:0]
 	p.lnkTbl = p.lnkTbl[0:0]
 }
@@ -155,17 +195,17 @@ func (p *Parser) Reset(r io.Reader) {
 // Next advances the parser to the next token in the stream.
 func (p *Parser) Next() (Token, error) {
 	// If we're currently parsing an IVar, then we handle the next symbol+value pair.
-	if p.cst != nil && p.cst.typ == ctxIVar {
-		if p.cst.sz > 0 {
+	if curSt := p.st.cur(); curSt != nil && curSt.typ == ctxIVar {
+		if curSt.sz > 0 {
 			return p.advIVar()
-		} else if p.cst.sz < 0 {
+		} else if curSt.sz < 0 {
 			// Crappy state handling being encoded in magic numbers.
 			// This situation means we only just parsed the beginning of the IVar
 			// in the previous Next() call. So we need to let the actual value read
 			// start. We mark the sz as 0 so that once we're back to this context
 			// (after current value is parsed) we'll then read the instance variable
 			// length and read all the instance vars.
-			p.cst.sz = 0
+			curSt.sz = 0
 		} else {
 			// If we get here, it's because we finished parsing the actual value for an IVar
 			// and now it's time to parse the instance variables.
@@ -173,20 +213,23 @@ func (p *Parser) Next() (Token, error) {
 			if err != nil {
 				return tokenStart, errors.Wrap(err, "ivar")
 			}
-			p.cst.pos = 0
-			p.cst.sz = int(n)
+			curSt.pos = 0
+			curSt.sz = int(n)
 			return p.advIVar()
 		}
-	} else if p.cst != nil && p.cst.pos == p.cst.sz {
+	} else if curSt != nil && curSt.pos > curSt.sz {
 		// If we're in the middle of an array/map, check if we've finished it.
-		switch p.cst.typ {
+		switch curSt.typ {
 		case ctxArray:
 			p.cur = TokenEndArray
 		case ctxHash:
 			p.cur = TokenEndHash
 		}
 
-		p.popStack()
+		p.st.pop()
+		if curSt := p.st.cur(); curSt != nil {
+			curSt.pos++
+		}
 		return p.cur, nil
 	}
 
@@ -194,8 +237,8 @@ func (p *Parser) Next() (Token, error) {
 		return 0, errors.Wrap(err, "rmarsh.Parser.Next()")
 	}
 
-	if p.cst != nil {
-		p.cst.pos++
+	if curSt := p.st.cur(); curSt != nil {
+		curSt.pos++
 	}
 
 	return p.cur, nil
@@ -220,7 +263,7 @@ func (p *Parser) Len() int {
 		return 0
 	}
 
-	return p.cst.sz
+	return p.st.cur().sz
 }
 
 // LinkId returns the id number for the current link value, or the expected link id for a linkable value.
@@ -320,11 +363,11 @@ func (p *Parser) Bytes() []byte {
 // IVarName returns the name of the instance variable that is currently being parsed.
 // Errors if not presently parsing the variables of an IVar.
 func (p *Parser) IVarName() (string, error) {
-	if p.cst == nil || p.cst.typ != ctxIVar {
+	if curSt := p.st.cur(); curSt == nil || curSt.typ != ctxIVar {
 		return "", errors.New("rmarsh.Parser.IVarName() called outside of an IVar")
+	} else {
+		return *curSt.ivSym, nil
 	}
-
-	return *p.cst.ivSym, nil
 }
 
 // Text returns the value contained in the current token interpreted as a string.
@@ -422,7 +465,7 @@ func (p *Parser) adv() (err error) {
 		if err != nil {
 			return errors.Wrap(err, "array")
 		}
-		p.pushStack(ctxArray, int(n))
+		p.st.push(ctxArray, n)
 		p.lnkTbl.add(r)
 	case typeHash:
 		p.cur = TokenStartHash
@@ -430,10 +473,10 @@ func (p *Parser) adv() (err error) {
 		if err != nil {
 			return errors.Wrap(err, "hash")
 		}
-		p.pushStack(ctxHash, int(n*2))
+		p.st.push(ctxHash, n*2)
 	case typeIvar:
 		p.cur = TokenStartIVar
-		p.pushStack(ctxIVar, -1)
+		p.st.push(ctxIVar, -1)
 	case typeLink:
 		p.cur = TokenLink
 		p.num, err = p.long()
@@ -446,12 +489,14 @@ func (p *Parser) adv() (err error) {
 }
 
 func (p *Parser) advIVar() (Token, error) {
-	if p.cst.pos == p.cst.sz {
+	curSt := p.st.cur()
+
+	if curSt.pos == curSt.sz {
 		p.cur = TokenEndIVar
-		p.popStack()
+		p.st.pop()
 		return p.cur, nil
 	}
-	p.cst.pos++
+	curSt.pos++
 
 	// Next thing needs to be a symbol, or things are really FUBAR.
 	if err := p.adv(); err != nil {
@@ -460,36 +505,10 @@ func (p *Parser) advIVar() (Token, error) {
 		return tokenStart, errors.Errorf("Unexpected token type %s while parsing IVar, expected Symbol", p.cur)
 	}
 	sym := string(p.buf[p.ctx.beg:p.ctx.end])
-	p.cst.ivSym = &sym
+	curSt.ivSym = &sym
 
 	err := p.adv()
 	return p.cur, err
-}
-
-func (p *Parser) pushStack(typ uint8, sz int) {
-	// Grow stack if needed
-	if l := len(p.st); p.stSz == l {
-		newStack := make([]parserContext, l+stackGrowSz)
-		copy(newStack, p.st)
-		p.st = newStack
-	}
-
-	p.cst = &p.st[p.stSz]
-	p.cst.typ = typ
-	p.cst.sz = sz
-	p.cst.pos = -1
-
-	p.stSz++
-}
-
-func (p *Parser) popStack() {
-	p.stSz--
-	if p.stSz > 0 {
-		p.cst = &p.st[p.stSz-1]
-		p.cst.pos++
-	} else {
-		p.cst = nil
-	}
 }
 
 // Strings, Symbols, Floats, Bignums and the like all begin with an encoded long
@@ -579,7 +598,6 @@ func (p *Parser) fill(num int) (r rng, err error) {
 		rd += n
 		p.pos += n
 	}
-	// fmt.Printf("cunt %d %d\n", num, rd)
 	if err == io.EOF {
 		err = io.ErrUnexpectedEOF
 	}
