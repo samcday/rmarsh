@@ -474,56 +474,58 @@ func (p *Parser) sizedBlob(bnum bool) (start, end int, err error) {
 	return p.fill(sz)
 }
 
-func (p *Parser) long() (int, error) {
-	start, _, err := p.fill(1)
-	b := p.buf[start]
+func (p *Parser) long() (n int, err error) {
+	_, _, err = p.fill(1)
 	if err != nil {
-		return 0, err
+		return
 	}
 
-	c := int(int8(b))
-	if c == 0 {
+	n = int(p.buf[p.pos-1])
+	if n == 0 {
 		return 0, nil
 	}
 
-	if c > 0 {
-		if 4 < c && c < 128 {
-			return c - 5, nil
+	if -129 < n && n < -4 {
+		n = n + 5
+		return
+	}
+
+	var pos, end int
+
+	if n > 0 {
+		if 4 < n && n < 128 {
+			n = n - 5
+			return
 		}
 
-		start, end, err := p.fill(c)
+		pos, end, err = p.fill(n)
 		if err != nil {
-			return 0, err
+			return
 		}
-		var x int
+		n = 0
 		var i int
-		for start <= end {
-			x |= int(p.buf[start]) << uint(8*i)
+		for pos <= end {
+			n |= int(p.buf[pos]) << uint(8*i)
 			i++
-			start++
+			pos++
 		}
-		return x, nil
+		return
 	}
 
-	if -129 < c && c < -4 {
-		return c + 5, nil
-	}
-
-	c = -c
-	start, end, err := p.fill(c)
+	pos, end, err = p.fill(-n)
 	if err != nil {
-		return 0, err
+		return
 	}
-	x := -1
+	n = -1
 	var i int
-	for start <= end {
-		x &= ^(0xff << uint(8*i))
-		x |= int(p.buf[start]) << uint(8*i)
+	for pos <= end {
+		n &= ^(0xff << uint(8*i))
+		n |= int(p.buf[pos]) << uint(8*i)
 		i++
-		start++
+		pos++
 	}
 
-	return x, err
+	return
 }
 
 func (p *Parser) addSym(start, end int) {
