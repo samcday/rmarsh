@@ -3,6 +3,7 @@ package rmarsh_test
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
 	"testing"
 
 	"github.com/samcday/rmarsh"
@@ -87,23 +88,55 @@ func BenchmarkParserBool(b *testing.B) {
 }
 
 func TestParserFixnum(t *testing.T) {
-	p := parseFromRuby(t, "123")
-	expectToken(t, p, rmarsh.TokenFixnum)
-	if n, err := p.Int(); err != nil {
-		t.Errorf("p.Int() err %s", err)
-	} else if n != 123 {
-		t.Errorf("p.Int() = %d, expected 123", n)
+	tests := []int{
+		0x00,
+		0x01,
+		0x06,
+		0xF0,
+		0xDEAD,
+		0x3FFFFFFF,
+		-0x00,
+		-0x01,
+		-0x06,
+		-0xF0,
+		-0xDEAD,
+		-0x3FFFFFFF,
 	}
-	expectToken(t, p, rmarsh.TokenEOF)
 
-	p = parseFromRuby(t, "true")
+	for _, num := range tests {
+		p := parseFromRuby(t, fmt.Sprintf("%#.2X", num))
+		expectToken(t, p, rmarsh.TokenFixnum)
+		if n, err := p.Int(); err != nil {
+			t.Fatalf("p.Int() err %s", err)
+		} else if n != num {
+			t.Fatalf("p.Int() = %#.2X, expected %#.2X", n, num)
+		}
+		expectToken(t, p, rmarsh.TokenEOF)
+	}
+
+	p := parseFromRuby(t, "true")
 	p.Next()
 	if _, err := p.Int(); err == nil || err.Error() != "rmarsh.Parser.Int() called for wrong token: TokenTrue" {
 		t.Errorf("p.Int() unexpected err %s", err)
 	}
 }
 
-func BenchmarkParserFixnum(b *testing.B) {
+func BenchmarkParserFixnumSingleByte(b *testing.B) {
+	buf := newCyclicReader(rbEncode(b, "100"))
+	p := rmarsh.NewParser(buf)
+
+	for i := 0; i < b.N; i++ {
+		p.Reset(nil)
+
+		if err := p.ExpectNext(rmarsh.TokenFixnum); err != nil {
+			b.Fatal(err)
+		}
+		if n, err := p.Int(); err != nil || n != 100 {
+			b.Fatalf("%v %v", n, err)
+		}
+	}
+}
+func BenchmarkParserFixnumMultiByte(b *testing.B) {
 	buf := newCyclicReader(rbEncode(b, "0xBEEF"))
 	p := rmarsh.NewParser(buf)
 
@@ -136,7 +169,23 @@ func TestParserFloat(t *testing.T) {
 	}
 }
 
-func BenchmarkParserFloat(b *testing.B) {
+func BenchmarkParserFloatSingleByte(b *testing.B) {
+	buf := newCyclicReader(rbEncode(b, "1.to_f"))
+	p := rmarsh.NewParser(buf)
+
+	for i := 0; i < b.N; i++ {
+		p.Reset(nil)
+
+		if err := p.ExpectNext(rmarsh.TokenFloat); err != nil {
+			b.Fatal(err)
+		}
+		if f, err := p.Float(); err != nil || f != 1 {
+			b.Fatalf("%v %v", f, err)
+		}
+	}
+}
+
+func BenchmarkParserFloatMultiByte(b *testing.B) {
 	buf := newCyclicReader(rbEncode(b, "123.321"))
 	p := rmarsh.NewParser(buf)
 
@@ -196,7 +245,24 @@ func TestParserSymbol(t *testing.T) {
 	expectToken(t, p, rmarsh.TokenEOF)
 }
 
-func BenchmarkParserSymbol(b *testing.B) {
+func BenchmarkParserSymbolSingleByte(b *testing.B) {
+	buf := newCyclicReader(rbEncode(b, ":E"))
+	p := rmarsh.NewParser(buf)
+	exp := []byte("E")
+
+	for i := 0; i < b.N; i++ {
+		p.Reset(nil)
+
+		if err := p.ExpectNext(rmarsh.TokenSymbol); err != nil {
+			b.Fatal(err)
+		}
+		if !bytes.Equal(p.Bytes(), exp) {
+			b.Fatalf("%s != test", p.Bytes())
+		}
+	}
+}
+
+func BenchmarkParserSymbolMultiByte(b *testing.B) {
 	buf := newCyclicReader(rbEncode(b, ":test"))
 	p := rmarsh.NewParser(buf)
 	exp := []byte("test")

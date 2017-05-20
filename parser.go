@@ -77,7 +77,8 @@ type Parser struct {
 	st parserStack
 
 	buf []byte // The read buffer contains every bit of data that we've read for the stream.
-	pos int    // Our write position in the read buffer
+	end int    // Where we've read up to the buffer
+	pos int    // Our read position in the read buffer
 	ctx rng    // Range of the raw data for the current token
 
 	num      int
@@ -186,6 +187,7 @@ func (p *Parser) Reset(r io.Reader) {
 		p.r = r
 	}
 	p.pos = 0
+	p.end = 0
 	p.cur = tokenStart
 	p.st = p.st[0:0]
 	p.symTbl = p.symTbl[0:0]
@@ -383,20 +385,22 @@ func (p *Parser) Text() (string, error) {
 }
 
 func (p *Parser) adv() (err error) {
-	var r rng
-
 	if p.cur == tokenStart {
-		if _, err := p.fill(3); err != nil {
-			return errors.Wrap(err, "reading magic")
-		} else if p.buf[0] != 0x04 || p.buf[1] != 0x08 {
-			return errors.Errorf("Expected magic header 0x0408, got 0x%.4X", int16(p.buf[0])<<8|int16(p.buf[1]))
-		} else {
-			// Minor optimisation: we fetched 3 bytes on the first read since there is always at least one token to read.
-			r.beg = 2
+		if err := p.fill(3); err != nil {
+			return err
 		}
-	} else {
-		r.beg = p.pos
-		_, err := p.fill(1)
+		p.pos = 2
+		if p.buf[0] != 0x04 || p.buf[1] != 0x08 {
+			return errors.Errorf("Expected magic header 0x0408, got 0x%.4X", int16(p.buf[0])<<8|int16(p.buf[1]))
+		}
+	}
+
+	start := p.pos
+	var typ uint8
+
+	if p.pos == p.end {
+		err = p.fill(1)
+		// TODO: should only transition to EOF if we were actually expecting it yo.
 		if err == io.ErrUnexpectedEOF {
 			p.cur = TokenEOF
 			return nil
@@ -405,7 +409,10 @@ func (p *Parser) adv() (err error) {
 		}
 	}
 
-	switch p.buf[r.beg] {
+	typ = p.buf[p.pos]
+	p.pos++
+
+	switch typ {
 	case typeNil:
 		p.cur = TokenNil
 	case typeTrue:
@@ -419,24 +426,36 @@ func (p *Parser) adv() (err error) {
 			return errors.Wrap(err, "fixnum")
 		}
 	case typeFloat:
+		// Float will be at least 2 more bytes - 1 for len and 1 for a digit
+		if err := p.fill(2); err != nil {
+			return errors.Wrap(err, "float")
+		}
+
 		p.cur = TokenFloat
 		if p.ctx, err = p.sizedBlob(false); err != nil {
 			return errors.Wrap(err, "float")
 		}
-		r.end = p.pos
-		p.lnkTbl.add(r)
+		p.lnkTbl.add(rng{start, p.pos})
 	case typeBignum:
 		p.cur = TokenBignum
-		r, err := p.fill(1)
-		if err != nil {
+
+		// Bignum will have at least 3 more bytes - 1 for sign, 1 for len and at least 1 digit.
+		if err := p.fill(3); err != nil {
 			return errors.Wrap(err, "bignum")
 		}
-		p.bnumsign = p.buf[r.beg]
+
+		p.bnumsign = p.buf[p.pos]
+		p.pos++
 
 		if p.ctx, err = p.sizedBlob(true); err != nil {
 			return errors.Wrap(err, "bignum")
 		}
 	case typeSymbol:
+		// Symbol will be at least 2 more bytes - 1 for len and 1 for a char.
+		if err := p.fill(2); err != nil {
+			return errors.Wrap(err, "symbol")
+		}
+
 		p.cur = TokenSymbol
 		p.ctx, err = p.sizedBlob(false)
 		if err != nil {
@@ -466,7 +485,7 @@ func (p *Parser) adv() (err error) {
 			return errors.Wrap(err, "array")
 		}
 		p.st.push(ctxArray, n)
-		p.lnkTbl.add(r)
+		p.lnkTbl.add(rng{start, p.pos})
 	case typeHash:
 		p.cur = TokenStartHash
 		n, err := p.long()
@@ -527,16 +546,27 @@ func (p *Parser) sizedBlob(bnum bool) (r rng, err error) {
 		sz = sz * 2
 	}
 
-	return p.fill(sz)
+	r.beg = p.pos
+	r.end = p.pos + sz
+
+	if r.end > p.end {
+		err = p.fill(r.end - p.end)
+	}
+	p.pos += sz
+	return
 }
 
 func (p *Parser) long() (n int, err error) {
-	_, err = p.fill(1)
-	if err != nil {
-		return
+	if p.pos == p.end {
+		err = p.fill(1)
+		if err != nil {
+			err = errors.Wrap(err, "long")
+			return
+		}
 	}
 
-	n = int(p.buf[p.pos-1])
+	n = int(int8(p.buf[p.pos]))
+	p.pos++
 	if n == 0 {
 		return
 	} else if 4 < n && n < 128 {
@@ -547,45 +577,41 @@ func (p *Parser) long() (n int, err error) {
 		return
 	}
 
-	var r rng
-
+	// It's a multibyte positive/negative num.
+	var sz int
 	if n > 0 {
-		r, err = p.fill(n)
+		sz = n
+		n = 0
+	} else {
+		sz = -n
+		n = -1
+	}
+
+	if p.pos+sz > p.end {
+		err = p.fill(p.pos + sz - p.end)
 		if err != nil {
 			return
 		}
-		n = 0
-		var i int
-		for r.beg <= r.end {
-			n |= int(p.buf[r.beg]) << uint(8*i)
-			i++
-			r.beg++
-		}
-		return
 	}
 
-	r, err = p.fill(-n)
-	if err != nil {
-		return
-	}
-	n = -1
-	var i int
-	for r.beg <= r.end {
-		n &= ^(0xff << uint(8*i))
-		n |= int(p.buf[r.beg]) << uint(8*i)
-		i++
-		r.beg++
+	for i := 0; i < sz; i++ {
+		if n < 0 {
+			n &= ^(0xff << uint(8*i))
+		}
+
+		n |= int(p.buf[p.pos]) << uint(8*i)
+		p.pos++
 	}
 
 	return
 }
 
-// Pull bytes from the io.Reader into our read buffer.
-func (p *Parser) fill(num int) (r rng, err error) {
-	r.beg = p.pos
-	r.end = p.pos + num
+// pull bytes from the io.Reader into our read buffer
+func (p *Parser) fill(num int) (err error) {
+	from, to := p.end, p.end+num
+	p.end += num
 
-	if r.end > len(p.buf) {
+	if to > len(p.buf) {
 		// Overflowed our read buffer, allocate a new one double the size,
 		buf := make([]byte, len(p.buf)*2)
 		copy(buf, p.buf)
@@ -594,12 +620,14 @@ func (p *Parser) fill(num int) (r rng, err error) {
 
 	var rd, n int
 	for rd < num && err == nil {
-		n, err = p.r.Read(p.buf[p.pos:r.end])
+		n, err = p.r.Read(p.buf[from:to])
 		rd += n
-		p.pos += n
+		from += n
 	}
 	if err == io.EOF {
 		err = io.ErrUnexpectedEOF
+	} else if err != nil {
+		err = errors.Wrap(err, "fill")
 	}
 	return
 }
