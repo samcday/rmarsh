@@ -344,11 +344,7 @@ func (p *Parser) readNext() (tok Token, err error) {
 	if p.pos == p.end {
 		err = p.fill(1)
 		// TODO: should only transition to EOF if we were actually expecting it yo.
-		if err == io.ErrUnexpectedEOF {
-			tok = TokenEOF
-			err = nil
-			return
-		} else if err != nil {
+		if err != nil {
 			err = errors.Wrap(err, "read type id")
 			return
 		}
