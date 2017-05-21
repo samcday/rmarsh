@@ -79,6 +79,7 @@ type Parser struct {
 
 	st    parserState
 	stack parserStack
+	lnkID int // id of the linked object this Parser is replaying
 
 	buf []byte // The read buffer contains every bit of data that we've read for the stream.
 	end int    // Where we've read up to the buffer
@@ -176,24 +177,57 @@ func (stk *parserStack) pop() (next parserState) {
 // Reader is buffered, or wrap it in a bufio.Reader.
 func NewParser(r io.Reader) *Parser {
 	p := &Parser{
-		r:   r,
-		buf: make([]byte, bufInitSz),
-		st:  parserStateTopLevel,
+		r:     r,
+		buf:   make([]byte, bufInitSz),
+		st:    parserStateTopLevel,
+		lnkID: -1,
 	}
 	return p
+}
+
+// Replay is used to construct a new Parser that will replay the events of a previously
+// parsed object.
+func (p *Parser) Replay(lnkID int) (*Parser, error) {
+	if lnkID >= len(p.lnkTbl) {
+		return nil, errors.Errorf("Object ID %d not valid", lnkID)
+	}
+
+	rng := p.lnkTbl[lnkID]
+	if rng.end == 0 {
+		return nil, errors.Errorf("Object ID %d is currently being parsed and cannot be replayed", lnkID)
+	}
+
+	return &Parser{
+		lnkID:  lnkID,
+		st:     parserStateTopLevel,
+		r:      nil,
+		buf:    p.buf,
+		pos:    rng.beg,
+		end:    rng.end,
+		lnkTbl: p.lnkTbl,
+		symTbl: p.symTbl,
+	}, nil
 }
 
 // Reset reverts the Parser into the identity state, ready to read a new Marshal 4.8 stream from the existing Reader.
 // If the provided io.Reader is nil, the existing Reader will continue to be used.
 func (p *Parser) Reset(r io.Reader) {
+	p.stack = p.stack[0:0]
+	p.cur = tokenInvalid
+	p.st = parserStateTopLevel
+
+	// If this a replay Parser, our reset is a little less ... reset-y.
+	if p.lnkID > -1 {
+		p.pos = p.lnkTbl[p.lnkID].beg
+		p.stack = p.stack[0:0]
+		return
+	}
+
 	if r != nil {
 		p.r = r
 	}
-	p.st = parserStateTopLevel
 	p.pos = 0
 	p.end = 0
-	p.cur = tokenInvalid
-	p.stack = p.stack[0:0]
 	p.symTbl = p.symTbl[0:0]
 	p.lnkTbl = p.lnkTbl[0:0]
 }
@@ -440,6 +474,11 @@ func (p *Parser) long() (n int, err error) {
 
 // pull bytes from the io.Reader into our read buffer
 func (p *Parser) fill(num int) (err error) {
+	// We don't do actual reads in sub Parser, the data is already in the buffer.
+	if p.lnkID > -1 {
+		return nil
+	}
+
 	// Optimisation: if our current stack gives us confidence there *must* be more data to read
 	// (i.e we're in an array/hash/ivar and processing anything but the last item)
 	// then we add an extra byte to what we read now. This avoids extra read calls for the
@@ -508,7 +547,11 @@ var typeParsers = []typeParserFn{
 			err = errors.Wrap(err, "float")
 			return
 		}
-		p.lnkTbl.add(rng{start, p.pos})
+
+		// We only insert into the link table if we're the top level parser.
+		if p.lnkID == -1 {
+			p.lnkTbl.add(rng{start, p.pos})
+		}
 		return
 	},
 	typeBignum: func(p *Parser) (tok Token, err error) {
@@ -542,7 +585,11 @@ var typeParsers = []typeParserFn{
 			err = errors.Wrap(err, "symbol")
 			return
 		}
-		p.symTbl.add(p.ctx)
+
+		// We only insert into the link table if we're the top level parser.
+		if p.lnkID == -1 {
+			p.symTbl.add(p.ctx)
+		}
 		return
 	},
 	typeString: func(p *Parser) (tok Token, err error) {
@@ -575,7 +622,10 @@ var typeParsers = []typeParserFn{
 			err = errors.Wrap(err, "array")
 			return
 		}
-		p.lnkTbl.add(rng{start, p.pos})
+		// We only insert into the link table if we're the top level parser.
+		if p.lnkID == -1 {
+			p.lnkTbl.add(rng{start, p.pos})
+		}
 		return
 	},
 	typeHash: func(p *Parser) (tok Token, err error) {
@@ -625,14 +675,16 @@ func nextState(p *Parser, tok Token, next parserState) parserState {
 
 // the initial state of a Parser expects to read 2-byte magic and then a top level value
 func parserStateTopLevel(p *Parser) (tok Token, next parserState, err error) {
-	if err = p.fill(3); err != nil {
-		return
+	if p.pos == 0 {
+		if err = p.fill(3); err != nil {
+			return
+		}
+		if p.buf[p.pos] != 0x04 || p.buf[p.pos+1] != 0x08 {
+			err = errors.Errorf("Expected magic header 0x0408, got 0x%.4X", int16(p.buf[p.pos])<<8|int16(p.buf[p.pos+1]))
+			return
+		}
+		p.pos = 2
 	}
-	if p.buf[p.pos] != 0x04 || p.buf[p.pos+1] != 0x08 {
-		err = errors.Errorf("Expected magic header 0x0408, got 0x%.4X", int16(p.buf[p.pos])<<8|int16(p.buf[p.pos+1]))
-		return
-	}
-	p.pos += 2
 
 	tok, err = p.readNext()
 	if err != nil {

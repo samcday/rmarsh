@@ -472,3 +472,24 @@ func TestParserLink(t *testing.T) {
 	}
 	expectToken(t, p, rmarsh.TokenEndArray)
 }
+
+func TestParserReplay(t *testing.T) {
+	p := parseFromRuby(t, `[123, 321]`)
+
+	expectToken(t, p, rmarsh.TokenStartArray)
+	expectToken(t, p, rmarsh.TokenFixnum)
+	expectToken(t, p, rmarsh.TokenFixnum)
+	expectToken(t, p, rmarsh.TokenEndArray)
+	expectToken(t, p, rmarsh.TokenEOF)
+
+	sub, err := p.Replay(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectToken(t, sub, rmarsh.TokenStartArray)
+	expectToken(t, sub, rmarsh.TokenFixnum)
+	expectToken(t, sub, rmarsh.TokenFixnum)
+	expectToken(t, sub, rmarsh.TokenEndArray)
+	expectToken(t, sub, rmarsh.TokenEOF)
+}
