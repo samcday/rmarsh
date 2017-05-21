@@ -2,6 +2,7 @@ package rmarsh_test
 
 import (
 	"bytes"
+	"reflect"
 	"testing"
 
 	"github.com/samcday/rmarsh"
@@ -109,8 +110,30 @@ func TestDecoderFloat(t *testing.T) {
 
 func TestDecoderString(t *testing.T) {
 	var s string
-	testDecoder(t, `[116,101,115,116].pack('c*')`, &s)
+	testDecoder(t, `"test".force_encoding("ASCII-8BIT")`, &s)
 	if s != "test" {
 		t.Errorf(`%v != "test"`, s)
+	}
+}
+
+func TestDecoderStringArray(t *testing.T) {
+	var s []string
+	testDecoder(t, `["test".force_encoding("ASCII-8BIT"),"test".force_encoding("ASCII-8BIT")]`, &s)
+	t.Log(s)
+	if !reflect.DeepEqual(s, []string{"test", "test"}) {
+		t.Errorf(`%+v != ["test", "test"]`, s)
+	}
+}
+
+func TestDecoderStringLink(t *testing.T) {
+	var s []*string
+	testDecoder(t, `s = "test".force_encoding("ASCII-8BIT"); [s, s]`, &s)
+
+	if *s[0] != "test" {
+		t.Errorf(`%+v != "test"`, s[0])
+	}
+
+	if s[0] != s[1] {
+		t.Error("ptrs do not match")
 	}
 }

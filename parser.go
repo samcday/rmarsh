@@ -285,7 +285,10 @@ func (p *Parser) LinkId() int {
 	switch p.cur {
 	case TokenLink:
 		return p.num
-	case TokenFloat, TokenStartArray:
+	case TokenStartIVar:
+		// IVar is special - we haven't insert something into lnkTbl yet, but we will be.
+		return len(p.lnkTbl)
+	case TokenFloat, TokenBignum, TokenString, TokenStartArray, TokenStartHash:
 		return len(p.lnkTbl) - 1
 	}
 	return -1

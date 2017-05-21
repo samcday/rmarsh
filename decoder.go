@@ -9,8 +9,8 @@ import (
 
 // A Decoder decodes a Ruby Marshal stream into concrete Golang structures.
 type Decoder struct {
-	p *Parser
-
+	p        *Parser
+	objCache []reflect.Value
 	curToken Token
 }
 
@@ -21,6 +21,7 @@ func NewDecoder(p *Parser) *Decoder {
 
 // ReadValue will consume a full Ruby Marshal stream from the given io.Reader and return a fully decoded Golang object.
 func ReadValue(r io.Reader, val interface{}) error {
+	// TODO: grab Parser instance from a sync.Pool
 	return NewDecoder(NewParser(r)).Decode(val)
 }
 
@@ -34,9 +35,9 @@ func (d *Decoder) Decode(val interface{}) error {
 }
 
 func (d *Decoder) nextToken() (Token, error) {
-	if d.curToken != tokenStart {
+	if d.curToken != tokenInvalid {
 		tok := d.curToken
-		d.curToken = tokenStart
+		d.curToken = tokenInvalid
 		return tok, nil
 	}
 	return d.p.Next()
@@ -82,6 +83,8 @@ func newTypeDecoder(t reflect.Type) decoderFunc {
 		return floatDecoder
 	case reflect.String:
 		return stringDecoder
+	case reflect.Slice:
+		return newSliceDecoder(t)
 	case reflect.Ptr:
 		return newPtrDecoder(t)
 	}
@@ -185,10 +188,60 @@ func stringDecoder(d *Decoder, v reflect.Value) error {
 			return err
 		}
 		v.SetString(str)
+
+		lnkId := d.p.LinkId()
+		if lnkId > -1 {
+			d.objCache = append(d.objCache, v.Addr())
+		}
+
 		return nil
 	default:
 		return fmt.Errorf("Unexpected token %v encountered while decoding string", tok)
 	}
+}
+
+type sliceDecoder struct {
+	elemDec decoderFunc
+}
+
+func (sliceDec *sliceDecoder) decode(d *Decoder, v reflect.Value) error {
+	tok, err := d.nextToken()
+	if err != nil {
+		return err
+	}
+
+	if tok != TokenStartArray {
+		return fmt.Errorf("Unexpected token %v encountered while decoding slice", tok)
+	}
+
+	l := d.p.Len()
+
+	// If the underlying slice already has enough capacity for this array, then we just resize
+	// and use it.
+	cap := v.Cap()
+	if cap >= l {
+		v.SetLen(l)
+		v.SetCap(l)
+	} else {
+		v.Set(reflect.MakeSlice(v.Type(), l, l))
+	}
+
+	lnkId := d.p.LinkId()
+	if lnkId > -1 {
+		d.objCache = append(d.objCache, v.Addr())
+	}
+
+	for i := 0; i < l; i++ {
+		if err := sliceDec.elemDec(d, v.Index(i)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func newSliceDecoder(t reflect.Type) decoderFunc {
+	dec := &sliceDecoder{newTypeDecoder(t.Elem())}
+	return dec.decode
 }
 
 type ptrDecoder struct {
@@ -207,7 +260,20 @@ func (ptrDec *ptrDecoder) decode(d *Decoder, v reflect.Value) error {
 		return nil
 	}
 
-	// TODO: if the token is a link, we dig up the cached reference and use that.
+	// If we've just parsed a link, then we see if we've cached the object already.
+	// If we we have, and it's directly assignable to the pointer type we have, then
+	// we can just immediately assign it and continue.
+	// Otherwise we start a replay parser and run it on the target.
+	if tok == TokenLink {
+		lnkID := d.p.LinkId()
+		cached := d.objCache[lnkID]
+		if cached.Type().AssignableTo(v.Type()) {
+			v.Set(cached)
+		} else {
+			// TODO: setup a replay parser and run it against the target.
+		}
+		return nil
+	}
 
 	// Push the token back and decode against resolved ptr.
 	d.curToken = tok
