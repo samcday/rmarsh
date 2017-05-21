@@ -196,6 +196,10 @@ func (p *Parser) Reset(r io.Reader) {
 
 // Next advances the parser to the next token in the stream.
 func (p *Parser) Next() (Token, error) {
+	if p.cur == TokenEOF {
+		return p.cur, nil
+	}
+
 	// If we're currently parsing an IVar, then we handle the next symbol+value pair.
 	if curSt := p.st.cur(); curSt != nil && curSt.typ == ctxIVar {
 		if curSt.sz > 0 {
@@ -395,9 +399,6 @@ func (p *Parser) adv() (err error) {
 		}
 	}
 
-	start := p.pos
-	var typ uint8
-
 	if p.pos == p.end {
 		err = p.fill(1)
 		// TODO: should only transition to EOF if we were actually expecting it yo.
@@ -409,102 +410,20 @@ func (p *Parser) adv() (err error) {
 		}
 	}
 
-	typ = p.buf[p.pos]
+	typ := p.buf[p.pos]
 	p.pos++
 
-	switch typ {
-	case typeNil:
-		p.cur = TokenNil
-	case typeTrue:
-		p.cur = TokenTrue
-	case typeFalse:
-		p.cur = TokenFalse
-	case typeFixnum:
-		p.cur = TokenFixnum
-		p.num, err = p.long()
-		if err != nil {
-			return errors.Wrap(err, "fixnum")
-		}
-	case typeFloat:
-		// Float will be at least 2 more bytes - 1 for len and 1 for a digit
-		if err := p.fill(2); err != nil {
-			return errors.Wrap(err, "float")
-		}
-
-		p.cur = TokenFloat
-		if p.ctx, err = p.sizedBlob(false); err != nil {
-			return errors.Wrap(err, "float")
-		}
-		p.lnkTbl.add(rng{start, p.pos})
-	case typeBignum:
-		p.cur = TokenBignum
-
-		// Bignum will have at least 3 more bytes - 1 for sign, 1 for len and at least 1 digit.
-		if err := p.fill(3); err != nil {
-			return errors.Wrap(err, "bignum")
-		}
-
-		p.bnumsign = p.buf[p.pos]
-		p.pos++
-
-		if p.ctx, err = p.sizedBlob(true); err != nil {
-			return errors.Wrap(err, "bignum")
-		}
-	case typeSymbol:
-		// Symbol will be at least 2 more bytes - 1 for len and 1 for a char.
-		if err := p.fill(2); err != nil {
-			return errors.Wrap(err, "symbol")
-		}
-
-		p.cur = TokenSymbol
-		p.ctx, err = p.sizedBlob(false)
-		if err != nil {
-			return errors.Wrap(err, "symbol")
-		}
-		p.symTbl.add(p.ctx)
-	case typeString:
-		p.cur = TokenString
-		if p.ctx, err = p.sizedBlob(false); err != nil {
-			return errors.Wrap(err, "string")
-		}
-	case typeSymlink:
-		p.cur = TokenSymbol
-		n, err := p.long()
-		if err != nil {
-			return errors.Wrap(err, "symlink id")
-		}
-		id := int(n)
-		if id >= len(p.symTbl) {
-			return errors.Errorf("Symlink id %d is larger than max known %d", id, len(p.symTbl)-1)
-		}
-		p.ctx = p.symTbl[id]
-	case typeArray:
-		p.cur = TokenStartArray
-		n, err := p.long()
-		if err != nil {
-			return errors.Wrap(err, "array")
-		}
-		p.st.push(ctxArray, n)
-		p.lnkTbl.add(rng{start, p.pos})
-	case typeHash:
-		p.cur = TokenStartHash
-		n, err := p.long()
-		if err != nil {
-			return errors.Wrap(err, "hash")
-		}
-		p.st.push(ctxHash, n*2)
-	case typeIvar:
-		p.cur = TokenStartIVar
-		p.st.push(ctxIVar, -1)
-	case typeLink:
-		p.cur = TokenLink
-		p.num, err = p.long()
-		if err != nil {
-			return errors.Wrap(err, "link")
-		}
+	fn := typeParsers[typ]
+	if fn == nil {
+		return errors.Errorf("Unhandled type %d encountered", typ)
 	}
 
-	return nil
+	tok, err := fn(p)
+	if err != nil {
+		return
+	}
+	p.cur = tok
+	return
 }
 
 func (p *Parser) advIVar() (Token, error) {
@@ -630,4 +549,136 @@ func (p *Parser) fill(num int) (err error) {
 		err = errors.Wrap(err, "fill")
 	}
 	return
+}
+
+type typeParserFn func(*Parser) (Token, error)
+
+func staticParser(tok Token) typeParserFn {
+	return func(*Parser) (Token, error) {
+		return tok, nil
+	}
+}
+
+var typeParsers = [255]typeParserFn{
+	typeNil:   staticParser(TokenNil),
+	typeTrue:  staticParser(TokenTrue),
+	typeFalse: staticParser(TokenFalse),
+	typeFixnum: func(p *Parser) (tok Token, err error) {
+		tok = TokenFixnum
+		p.num, err = p.long()
+		if err != nil {
+			err = errors.Wrap(err, "fixnum")
+		}
+		return
+	},
+	typeFloat: func(p *Parser) (tok Token, err error) {
+		start := p.pos - 1
+		tok = TokenFloat
+
+		// Float will be at least 2 more bytes - 1 for len and 1 for a digit
+		if err = p.fill(2); err != nil {
+			err = errors.Wrap(err, "float")
+			return
+		}
+
+		if p.ctx, err = p.sizedBlob(false); err != nil {
+			err = errors.Wrap(err, "float")
+			return
+		}
+		p.lnkTbl.add(rng{start, p.pos})
+		return
+	},
+	typeBignum: func(p *Parser) (tok Token, err error) {
+		tok = TokenBignum
+
+		// Bignum will have at least 3 more bytes - 1 for sign, 1 for len and at least 1 digit.
+		if err = p.fill(3); err != nil {
+			err = errors.Wrap(err, "bignum")
+			return
+		}
+
+		p.bnumsign = p.buf[p.pos]
+		p.pos++
+
+		if p.ctx, err = p.sizedBlob(true); err != nil {
+			err = errors.Wrap(err, "bignum")
+		}
+		return
+	},
+	typeSymbol: func(p *Parser) (tok Token, err error) {
+		tok = TokenSymbol
+
+		// Symbol will be at least 2 more bytes - 1 for len and 1 for a char.
+		if err = p.fill(2); err != nil {
+			err = errors.Wrap(err, "symbol")
+			return
+		}
+
+		p.ctx, err = p.sizedBlob(false)
+		if err != nil {
+			err = errors.Wrap(err, "symbol")
+			return
+		}
+		p.symTbl.add(p.ctx)
+		return
+	},
+	typeString: func(p *Parser) (tok Token, err error) {
+		tok = TokenString
+		if p.ctx, err = p.sizedBlob(false); err != nil {
+			err = errors.Wrap(err, "string")
+		}
+		return
+	},
+	typeSymlink: func(p *Parser) (tok Token, err error) {
+		tok = TokenSymbol
+		var n int
+		n, err = p.long()
+		if err != nil {
+			err = errors.Wrap(err, "symlink id")
+			return
+		}
+		if n >= len(p.symTbl) {
+			err = errors.Errorf("Symlink id %d is larger than max known %d", n, len(p.symTbl)-1)
+			return
+		}
+		p.ctx = p.symTbl[n]
+		return
+	},
+	typeArray: func(p *Parser) (tok Token, err error) {
+		tok = TokenStartArray
+		start := p.pos - 1
+		var n int
+		n, err = p.long()
+		if err != nil {
+			err = errors.Wrap(err, "array")
+			return
+		}
+		p.st.push(ctxArray, n)
+		p.lnkTbl.add(rng{start, p.pos})
+		return
+	},
+	typeHash: func(p *Parser) (tok Token, err error) {
+		tok = TokenStartHash
+		var n int
+		n, err = p.long()
+		if err != nil {
+			err = errors.Wrap(err, "hash")
+			return
+		}
+		p.st.push(ctxHash, n*2)
+		return
+	},
+	typeIvar: func(p *Parser) (tok Token, err error) {
+		tok = TokenStartIVar
+		p.st.push(ctxIVar, -1)
+		return
+	},
+	typeLink: func(p *Parser) (tok Token, err error) {
+		tok = TokenLink
+		p.num, err = p.long()
+		if err != nil {
+			err = errors.Wrap(err, "link")
+		}
+		return
+	},
 }

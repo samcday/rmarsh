@@ -31,11 +31,11 @@ func TestParserReset(t *testing.T) {
 
 	p.Reset(&b2)
 	if p.r != &b2 {
-		t.Fatal("p.r == %v, not %v", p.r, b2)
+		t.Fatalf("p.r == %v, not %v", p.r, b2)
 	}
 
 	p.Reset(nil)
 	if p.r != &b2 {
-		t.Fatal("p.r == %v, not %v", p.r, b2)
+		t.Fatalf("p.r == %v, not %v", p.r, b2)
 	}
 }
