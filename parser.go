@@ -444,6 +444,16 @@ func (p *Parser) long() (n int, err error) {
 
 // pull bytes from the io.Reader into our read buffer
 func (p *Parser) fill(num int) (err error) {
+	// Optimisation: if our current stack gives us confidence there *must* be more data to read
+	// (i.e we're in an array/hash/ivar and processing anything but the last item)
+	// then we add an extra byte to what we read now. This avoids extra read calls for the
+	// subsequent type byte.
+	for i := len(p.stack) - 1; i >= 0; i-- {
+		if p.stack[i].sz > 0 && p.stack[i].pos < p.stack[i].sz-1 {
+			num++
+		}
+	}
+
 	from, to := p.end, p.end+num
 	p.end += num
 
@@ -627,7 +637,7 @@ func parserStateTopLevel(p *Parser) (tok Token, next parserState, err error) {
 		return
 	}
 	p.pos += 2
-	// next = parserStateTopLevel
+
 	tok, err = p.readNext()
 	if err != nil {
 		return
