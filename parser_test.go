@@ -38,7 +38,7 @@ func TestParserInvalidMagic(t *testing.T) {
 	raw := []byte{0x04, 0x07, '0'}
 	p := rmarsh.NewParser(bytes.NewReader(raw))
 	_, err := p.Next()
-	if err == nil || err.Error() != "rmarsh.Parser.Next(): Expected magic header 0x0408, got 0x0407" {
+	if err == nil || err.Error() != "Expected magic header 0x0408, got 0x0407" {
 		t.Fatalf("Unexpected err %s", err)
 	}
 }
@@ -417,14 +417,13 @@ func TestParserIVarArray(t *testing.T) {
 	expectToken(t, p, rmarsh.TokenStartArray)
 	expectToken(t, p, rmarsh.TokenEndArray)
 
-	// Next token should be the :@test value, a fixnum
-	expectToken(t, p, rmarsh.TokenFixnum)
-	// And the current instance variable should be @test
-	if str, err := p.IVarName(); err != nil {
+	expectToken(t, p, rmarsh.TokenSymbol)
+	if str, err := p.Text(); err != nil {
 		t.Fatal(err)
 	} else if str != "@test" {
-		t.Errorf("p.IVarName() = %s, expected @test", str)
+		t.Errorf("p.Text() = %s, expected @test", str)
 	}
+	expectToken(t, p, rmarsh.TokenFixnum)
 
 	expectToken(t, p, rmarsh.TokenEndIVar)
 	expectToken(t, p, rmarsh.TokenEOF)
@@ -435,6 +434,8 @@ func TestParserIVarHash(t *testing.T) {
 	expectToken(t, p, rmarsh.TokenStartIVar)
 	expectToken(t, p, rmarsh.TokenStartHash)
 	expectToken(t, p, rmarsh.TokenEndHash)
+
+	expectToken(t, p, rmarsh.TokenSymbol)
 	expectToken(t, p, rmarsh.TokenFixnum)
 	expectToken(t, p, rmarsh.TokenEndIVar)
 	expectToken(t, p, rmarsh.TokenEOF)
@@ -444,12 +445,13 @@ func TestParserIVarString(t *testing.T) {
 	p := parseFromRuby(t, `"test"`)
 	expectToken(t, p, rmarsh.TokenStartIVar)
 	expectToken(t, p, rmarsh.TokenString)
-	expectToken(t, p, rmarsh.TokenTrue)
-	if str, err := p.IVarName(); err != nil {
+	expectToken(t, p, rmarsh.TokenSymbol)
+	if str, err := p.Text(); err != nil {
 		t.Fatal(err)
 	} else if str != "E" {
-		t.Errorf("p.IVarName() = %s, expected E", str)
+		t.Errorf("p.Text() = %s, expected E", str)
 	}
+	expectToken(t, p, rmarsh.TokenTrue)
 	expectToken(t, p, rmarsh.TokenEndIVar)
 	expectToken(t, p, rmarsh.TokenEOF)
 }
