@@ -236,6 +236,11 @@ func (sliceDec *sliceDecoder) decode(d *Decoder, v reflect.Value) error {
 			return err
 		}
 	}
+
+	if err := d.p.ExpectNext(TokenEndArray); err != nil {
+		return err
+	}
+
 	return nil
 }
 

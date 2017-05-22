@@ -116,6 +116,14 @@ func TestDecoderString(t *testing.T) {
 	}
 }
 
+func TestDecoderFixnumArray(t *testing.T) {
+	var arr []int
+	testDecoder(t, `[123,321]`, &arr)
+	if !reflect.DeepEqual(arr, []int{123, 321}) {
+		t.Fatalf("%+v != [123,321]", arr)
+	}
+}
+
 func TestDecoderStringArray(t *testing.T) {
 	var s []string
 	testDecoder(t, `["test".force_encoding("ASCII-8BIT"),"test".force_encoding("ASCII-8BIT")]`, &s)
@@ -134,6 +142,15 @@ func TestDecoderStringLink(t *testing.T) {
 	}
 
 	if s[0] != s[1] {
+		t.Error("ptrs do not match")
+	}
+}
+
+func TestDecoderArrayLink(t *testing.T) {
+	var arr []*[]int
+	testDecoder(t, `a = [123]; [a,a]`, &arr)
+
+	if arr[0] != arr[1] {
 		t.Error("ptrs do not match")
 	}
 }
