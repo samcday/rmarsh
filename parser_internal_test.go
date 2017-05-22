@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestParserRnngTblGrow(t *testing.T) {
+func TestParserRngTblGrow(t *testing.T) {
 	var tbl rngTbl
 
 	tbl.add(rng{})

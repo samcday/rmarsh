@@ -281,7 +281,7 @@ func BenchmarkParserSymbolMultiByte(b *testing.B) {
 
 func TestParserString(t *testing.T) {
 	// We generate this string in a convoluted way so it has no encoding (and thus no IVar)
-	p := parseFromRuby(t, "[116,101,115,116].pack('c*')")
+	p := parseFromRuby(t, `"test".force_encoding("ASCII-8BIT")`)
 	expectToken(t, p, rmarsh.TokenString)
 	if str, err := p.Text(); err != nil {
 		t.Errorf("p.Text() err %s", err)
@@ -292,7 +292,7 @@ func TestParserString(t *testing.T) {
 }
 
 func BenchmarkParserString(b *testing.B) {
-	buf := newCyclicReader(rbEncode(b, "[116,101,115,116].pack('c*')"))
+	buf := newCyclicReader(rbEncode(b, `"test".force_encoding("ASCII-8BIT")`))
 	p := rmarsh.NewParser(buf)
 	exp := []byte("test")
 
@@ -473,12 +473,89 @@ func TestParserLink(t *testing.T) {
 	expectToken(t, p, rmarsh.TokenEndArray)
 }
 
-func TestParserReplay(t *testing.T) {
-	p := parseFromRuby(t, `[123, 321]`)
+func TestParserReplayArray(t *testing.T) {
+	p := parseFromRuby(t, `[]`)
+	expectToken(t, p, rmarsh.TokenStartArray)
+	expectToken(t, p, rmarsh.TokenEndArray)
+	expectToken(t, p, rmarsh.TokenEOF)
+
+	sub, err := p.Replay(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectToken(t, sub, rmarsh.TokenStartArray)
+	expectToken(t, sub, rmarsh.TokenEndArray)
+	expectToken(t, sub, rmarsh.TokenEOF)
+}
+
+func TestParserReplayHash(t *testing.T) {
+	p := parseFromRuby(t, `{}`)
+	expectToken(t, p, rmarsh.TokenStartHash)
+	expectToken(t, p, rmarsh.TokenEndHash)
+	expectToken(t, p, rmarsh.TokenEOF)
+
+	sub, err := p.Replay(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectToken(t, sub, rmarsh.TokenStartHash)
+	expectToken(t, sub, rmarsh.TokenEndHash)
+	expectToken(t, sub, rmarsh.TokenEOF)
+}
+
+func TestParserReplayFloat(t *testing.T) {
+	p := parseFromRuby(t, `1.2`)
+	expectToken(t, p, rmarsh.TokenFloat)
+	expectToken(t, p, rmarsh.TokenEOF)
+
+	sub, err := p.Replay(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectToken(t, sub, rmarsh.TokenFloat)
+	expectToken(t, sub, rmarsh.TokenEOF)
+}
+
+func TestParserReplayRawString(t *testing.T) {
+	p := parseFromRuby(t, `"test".force_encoding("ASCII-8BIT")`)
+	expectToken(t, p, rmarsh.TokenString)
+	expectToken(t, p, rmarsh.TokenEOF)
+
+	sub, err := p.Replay(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectToken(t, sub, rmarsh.TokenString)
+	expectToken(t, sub, rmarsh.TokenEOF)
+}
+
+func TestParserReplayIVarString(t *testing.T) {
+	p := parseFromRuby(t, `"test"`)
+	expectToken(t, p, rmarsh.TokenStartIVar)
+	expectToken(t, p, rmarsh.TokenString)
+	expectToken(t, p, rmarsh.TokenSymbol)
+	expectToken(t, p, rmarsh.TokenTrue)
+	expectToken(t, p, rmarsh.TokenEndIVar)
+	expectToken(t, p, rmarsh.TokenEOF)
+
+	sub, err := p.Replay(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectToken(t, sub, rmarsh.TokenStartIVar)
+	expectToken(t, sub, rmarsh.TokenString)
+	expectToken(t, sub, rmarsh.TokenSymbol)
+	expectToken(t, sub, rmarsh.TokenTrue)
+	expectToken(t, sub, rmarsh.TokenEndIVar)
+	expectToken(t, sub, rmarsh.TokenEOF)
+}
+
+func TestParserReplayContrived(t *testing.T) {
+	p := parseFromRuby(t, `a = 1.2; [a, a]`)
 
 	expectToken(t, p, rmarsh.TokenStartArray)
-	expectToken(t, p, rmarsh.TokenFixnum)
-	expectToken(t, p, rmarsh.TokenFixnum)
+	expectToken(t, p, rmarsh.TokenFloat)
+	expectToken(t, p, rmarsh.TokenLink)
 	expectToken(t, p, rmarsh.TokenEndArray)
 	expectToken(t, p, rmarsh.TokenEOF)
 
@@ -488,8 +565,41 @@ func TestParserReplay(t *testing.T) {
 	}
 
 	expectToken(t, sub, rmarsh.TokenStartArray)
-	expectToken(t, sub, rmarsh.TokenFixnum)
-	expectToken(t, sub, rmarsh.TokenFixnum)
+	expectToken(t, sub, rmarsh.TokenFloat)
+	expectToken(t, sub, rmarsh.TokenLink)
 	expectToken(t, sub, rmarsh.TokenEndArray)
 	expectToken(t, sub, rmarsh.TokenEOF)
+
+	sub2, err := p.Replay(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectToken(t, sub2, rmarsh.TokenFloat)
+	expectToken(t, sub2, rmarsh.TokenEOF)
 }
+
+// func TestParserReplayIVar(t *testing.T) {
+// 	p := parseFromRuby(t, `["test", 321]`)
+
+// 	expectToken(t, p, rmarsh.TokenStartArray)
+// 	expectToken(t, p, rmarsh.TokenStartIVar)
+// 	expectToken(t, p, rmarsh.TokenString)
+// 	expectToken(t, p, rmarsh.TokenSymbol)
+// 	expectToken(t, p, rmarsh.TokenTrue)
+// 	expectToken(t, p, rmarsh.TokenEndIVar)
+// 	expectToken(t, p, rmarsh.TokenFixnum)
+// 	expectToken(t, p, rmarsh.TokenEndArray)
+// 	expectToken(t, p, rmarsh.TokenEOF)
+
+// 	sub, err := p.Replay(1)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+
+// 	expectToken(t, sub, rmarsh.TokenStartIVar)
+// 	expectToken(t, sub, rmarsh.TokenString)
+// 	expectToken(t, sub, rmarsh.TokenSymbol)
+// 	expectToken(t, sub, rmarsh.TokenTrue)
+// 	expectToken(t, sub, rmarsh.TokenEndIVar)
+// 	expectToken(t, sub, rmarsh.TokenEOF)
+// }
