@@ -39,3 +39,15 @@ func TestParserReset(t *testing.T) {
 		t.Fatalf("p.r == %v, not %v", p.r, b2)
 	}
 }
+
+func TestParserReplayRecursive(t *testing.T) {
+	p := Parser{lnkID: 1}
+	if _, err := p.Replay(1); err.Error() != "Object ID 1 is already being replayed by this Parser" {
+		t.Fatalf("Unexpected err %s", err)
+	}
+
+	p2 := Parser{parent: &p, lnkID: 123}
+	if _, err := p2.Replay(1); err.Error() != "Object ID 1 is already being replayed by this Parser" {
+		t.Fatalf("Unexpected err %s", err)
+	}
+}

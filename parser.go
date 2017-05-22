@@ -77,9 +77,10 @@ type Parser struct {
 
 	cur Token // The token we have most recently parsed
 
-	st    parserState
-	stack parserStack
-	lnkID int // id of the linked object this Parser is replaying
+	st     parserState
+	stack  parserStack
+	lnkID  int // id of the linked object this Parser is replaying
+	parent *Parser
 
 	buf []byte // The read buffer contains every bit of data that we've read for the stream.
 	end int    // Where we've read up to the buffer
@@ -188,6 +189,13 @@ func NewParser(r io.Reader) *Parser {
 // Replay is used to construct a new Parser that will replay the events of a previously
 // parsed object.
 func (p *Parser) Replay(lnkID int) (*Parser, error) {
+	// Walk up the parent chain and ensure we aren't replaying something we're already replaying somewhere in the chain.
+	for par := p; par != nil; par = par.parent {
+		if par.lnkID == lnkID {
+			return nil, errors.Errorf("Object ID %d is already being replayed by this Parser", lnkID)
+		}
+	}
+
 	if lnkID >= len(p.lnkTbl) {
 		return nil, errors.Errorf("Object ID %d not valid", lnkID)
 	}
@@ -198,6 +206,7 @@ func (p *Parser) Replay(lnkID int) (*Parser, error) {
 	}
 
 	return &Parser{
+		parent: p,
 		lnkID:  lnkID,
 		st:     parserStateTopLevel,
 		r:      nil,
