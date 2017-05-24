@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -73,6 +75,8 @@ func (d *Decoder) typeDecoder(t reflect.Type) decoderFunc {
 
 func newTypeDecoder(t reflect.Type) decoderFunc {
 	switch t.Kind() {
+	case reflect.Invalid:
+		return skipDecoder
 	case reflect.Bool:
 		return boolDecoder
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
@@ -85,10 +89,20 @@ func newTypeDecoder(t reflect.Type) decoderFunc {
 		return stringDecoder
 	case reflect.Slice:
 		return newSliceDecoder(t)
+	case reflect.Struct:
+		return newStructDecoder(t)
 	case reflect.Ptr:
 		return newPtrDecoder(t)
 	}
 	return unsupportedTypeDecoder
+}
+
+func skipDecoder(d *Decoder, v reflect.Value) error {
+	_, err := d.p.readNext()
+	if err != nil {
+		return err
+	}
+	return d.p.Skip()
 }
 
 func boolDecoder(d *Decoder, v reflect.Value) error {
@@ -182,6 +196,12 @@ func stringDecoder(d *Decoder, v reflect.Value) error {
 	}
 
 	switch tok {
+	case TokenIVar:
+		// We're okay with an IVar as long as the next token is a String.
+		if err := d.p.ExpectNext(TokenString); err != nil {
+
+		}
+
 	case TokenString, TokenSymbol:
 		str, err := d.p.Text()
 		if err != nil {
@@ -249,6 +269,88 @@ func newSliceDecoder(t reflect.Type) decoderFunc {
 	return dec.decode
 }
 
+type idxStructField struct {
+	idx int // index in the struct
+	dec decoderFunc
+}
+type idxStructDecoder struct {
+	fields []idxStructField
+}
+
+func (idxDec *idxStructDecoder) decode(d *Decoder, v reflect.Value) error {
+	tok, err := d.nextToken()
+	if err != nil {
+		return err
+	}
+
+	switch tok {
+	case TokenStartArray:
+		l := d.p.Len()
+		if l > len(idxDec.fields) {
+			l = len(idxDec.fields)
+		}
+
+		for i := 0; i < l; i++ {
+			f := idxDec.fields[i]
+			fmt.Println("woot %+v", f)
+			if err := f.dec(d, v.Field(f.idx)); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf("Unexpected token %v encountered while decoding indexed struct", tok)
+	}
+
+}
+
+func newStructDecoder(t reflect.Type) decoderFunc {
+	// A struct decoder can either be indexed or named.
+	// Indexed decoders expect to decode a Ruby Array into a Go struct.
+	// Named decoders expecet to decode a Ruby Hash/Struct into a Go struct.
+	var idxFields []idxStructField
+	named := make(map[string]decoderFunc)
+
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		fdec := newTypeDecoder(f.Type)
+
+		meta := strings.Split(f.Tag.Get("rmarsh"), ",")
+		if meta[0] == "" {
+			continue
+		}
+		if meta[0] == "_indexed" {
+			if len(named) > 0 {
+				return newErrorDecoder(fmt.Errorf("Cannot mix named and _indexed fields in struct %s", t))
+			}
+			idx, err := strconv.ParseInt(meta[1], 10, 32)
+			if err != nil {
+				return newErrorDecoder(fmt.Errorf("Struct %s field %q has invalid _indexed value %q", t, f.Name, meta[1]))
+			}
+			if len(idxFields) <= int(idx) {
+				idxFields = append(idxFields, make([]idxStructField, int(idx)-len(idxFields)+1)...)
+			}
+			fmt.Println("hmmm", len(idxFields), idx)
+			idxFields[idx] = idxStructField{idx: int(idx), dec: fdec}
+		} else {
+			if len(idxFields) > 0 {
+				return newErrorDecoder(fmt.Errorf("Cannot mix named and _indexed fields in struct %s", t))
+			}
+			named[f.Name] = fdec
+		}
+	}
+
+	if len(idxFields) > 0 {
+		dec := &idxStructDecoder{idxFields}
+		return dec.decode
+	}
+	if len(named) > 0 {
+		dec := &idxStructDecoder{}
+		return dec.decode
+	}
+	return skipDecoder
+}
+
 type ptrDecoder struct {
 	elemDec decoderFunc
 }
@@ -292,6 +394,18 @@ func (ptrDec *ptrDecoder) decode(d *Decoder, v reflect.Value) error {
 func newPtrDecoder(t reflect.Type) decoderFunc {
 	dec := &ptrDecoder{newTypeDecoder(t.Elem())}
 	return dec.decode
+}
+
+type errorDecoder struct {
+	err error
+}
+
+func (errDec errorDecoder) decode(d *Decoder, v reflect.Value) error {
+	return errDec.err
+}
+
+func newErrorDecoder(err error) decoderFunc {
+	return errorDecoder{err}.decode
 }
 
 func unsupportedTypeDecoder(d *Decoder, v reflect.Value) error {

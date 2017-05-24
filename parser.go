@@ -38,6 +38,7 @@ const (
 	TokenStartHash
 	TokenEndHash
 	TokenStartIVar
+	TokenIVarProps
 	TokenEndIVar
 	TokenLink
 	TokenEOF
@@ -264,6 +265,33 @@ func (p *Parser) ExpectNext(exp Token) error {
 	}
 	if tok != exp {
 		return errors.Errorf("rmarsh.Parser.ExpectNext(): read token %s, expected %s", tok, exp)
+	}
+	return nil
+}
+
+// Skip examines the current token, and will continuously read tokens until the current
+// object is fully consumed. Does nothing for single token types like Fixnum, Bool, Nil, Bignum,
+// String, Symbol, etc.
+func (p *Parser) Skip() (err error) {
+	var depth int
+	switch p.cur {
+	case TokenStartArray, TokenStartHash, TokenStartIVar:
+		depth++
+	}
+
+	var tok Token
+	for depth > 0 {
+		tok, err = p.Next()
+		if err != nil {
+			return
+		}
+
+		switch tok {
+		case TokenStartArray, TokenStartHash, TokenStartIVar:
+			depth++
+		case TokenEndArray, TokenEndHash, TokenEndIVar:
+			depth--
+		}
 	}
 	return nil
 }
