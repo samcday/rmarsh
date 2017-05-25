@@ -47,13 +47,13 @@ func (d *Decoder) nextToken() (Token, error) {
 
 type decoderFunc func(*Decoder, reflect.Value) error
 
+func (d *Decoder) valueDecoder(v reflect.Value) decoderFunc {
+	return d.typeDecoder(v.Type())
+}
+
 var decCache struct {
 	sync.RWMutex
 	m map[reflect.Type]decoderFunc
-}
-
-func (d *Decoder) valueDecoder(v reflect.Value) decoderFunc {
-	return d.typeDecoder(v.Type())
 }
 
 func (d *Decoder) typeDecoder(t reflect.Type) decoderFunc {
@@ -115,7 +115,6 @@ func boolDecoder(d *Decoder, v reflect.Value) error {
 	case TokenTrue, TokenFalse:
 		v.SetBool(tok == TokenTrue)
 		return nil
-	// TODO: support other types and coerce them to something bool-y?
 	default:
 		// TODO: build a path
 		return fmt.Errorf("Unexpected token %v encountered while decoding bool", tok)
@@ -196,13 +195,32 @@ func stringDecoder(d *Decoder, v reflect.Value) error {
 	}
 
 	switch tok {
+	case TokenUsrMarshal:
+		return fmt.Errorf("nope")
 	case TokenStartIVar:
 		// We're okay with an IVar as long as the next token is a String.
 		if err := d.p.ExpectNext(TokenString); err != nil {
 			return err
 		}
+
+		str, err := d.p.Text()
+		if err != nil {
+			return err
+		}
+		v.SetString(str)
+
+		lnkId := d.p.LinkId()
+		if lnkId > -1 {
+			d.objCache = append(d.objCache, v.Addr())
+		}
+
+		if err := d.p.ExpectNext(TokenIVarProps); err != nil {
+			return err
+		}
 		// TODO: properly parse IVar. For now, we just skip over encoding and such.
-		d.p.Skip()
+		if err := d.p.Skip(); err != nil {
+			return err
+		}
 		return nil
 	case TokenString, TokenSymbol:
 		str, err := d.p.Text()
@@ -288,17 +306,30 @@ func (idxDec *idxStructDecoder) decode(d *Decoder, v reflect.Value) error {
 	switch tok {
 	case TokenStartArray:
 		l := d.p.Len()
-		if l > len(idxDec.fields) {
-			l = len(idxDec.fields)
-		}
 
 		for i := 0; i < l; i++ {
-			f := idxDec.fields[i]
-			fmt.Println("woot %+v", f)
-			if err := f.dec(d, v.Field(f.idx)); err != nil {
+			if i < len(idxDec.fields) {
+				f := idxDec.fields[i]
+				if f.dec != nil {
+					if err := f.dec(d, v.Field(f.idx)); err != nil {
+						return err
+					}
+					continue
+				}
+			}
+
+			if _, err := d.p.Next(); err != nil {
+				return err
+			}
+
+			if err := d.p.Skip(); err != nil {
 				return err
 			}
 		}
+		if err := d.p.ExpectNext(TokenEndArray); err != nil {
+			return err
+		}
+
 		return nil
 	default:
 		return fmt.Errorf("Unexpected token %v encountered while decoding indexed struct", tok)
@@ -315,6 +346,11 @@ func newStructDecoder(t reflect.Type) decoderFunc {
 
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
+
+		if f.PkgPath != "" {
+			continue
+		}
+
 		fdec := newTypeDecoder(f.Type)
 
 		meta := strings.Split(f.Tag.Get("rmarsh"), ",")
@@ -332,8 +368,7 @@ func newStructDecoder(t reflect.Type) decoderFunc {
 			if len(idxFields) <= int(idx) {
 				idxFields = append(idxFields, make([]idxStructField, int(idx)-len(idxFields)+1)...)
 			}
-			fmt.Println("hmmm", len(idxFields), idx)
-			idxFields[idx] = idxStructField{idx: int(idx), dec: fdec}
+			idxFields[idx] = idxStructField{idx: i, dec: fdec}
 		} else {
 			if len(idxFields) > 0 {
 				return newErrorDecoder(fmt.Errorf("Cannot mix named and _indexed fields in struct %s", t))
@@ -375,13 +410,16 @@ func (ptrDec *ptrDecoder) decode(d *Decoder, v reflect.Value) error {
 	// Otherwise we start a replay parser and run it on the target.
 	if tok == TokenLink {
 		lnkID := d.p.LinkId()
-		cached := d.objCache[lnkID]
-		if cached.Type().AssignableTo(v.Type()) {
-			v.Set(cached)
-		} else {
-			// TODO: setup a replay parser and run it against the target.
+		if len(d.objCache) > lnkID {
+			cached := d.objCache[lnkID]
+			if cached.Type().AssignableTo(v.Type()) {
+				v.Set(cached)
+				return nil
+			}
 		}
-		return nil
+
+		// TODO: setup a replay parser and run it against the target.
+		return fmt.Errorf("Unhandled link encountered. %d %d")
 	}
 
 	// Push the token back and decode against resolved ptr.

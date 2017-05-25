@@ -278,26 +278,36 @@ func (p *Parser) ExpectNext(exp Token) error {
 // String, Symbol, etc.
 func (p *Parser) Skip() (err error) {
 	var depth int
-	switch p.cur {
-	case TokenStartArray, TokenStartHash, TokenStartIVar, TokenIVarProps:
+	if p.cur == TokenIVarProps {
 		depth++
 	}
-
-	var tok Token
-	for depth > 0 {
-		tok, err = p.Next()
-		if err != nil {
-			return
-		}
-
-		switch tok {
+	for {
+		switch p.cur {
 		case TokenStartArray, TokenStartHash, TokenStartIVar:
 			depth++
 		case TokenEndArray, TokenEndHash, TokenEndIVar:
 			depth--
+		case TokenUsrMarshal:
+			_, err = p.Next()
+			if err != nil {
+				return
+			}
+			_, err = p.Next()
+			if err != nil {
+				return
+			}
+			continue
+		}
+
+		if depth == 0 {
+			return nil
+		}
+
+		_, err = p.Next()
+		if err != nil {
+			return
 		}
 	}
-	return nil
 }
 
 // Len returns the number of elements to be read in the current structure.
