@@ -41,6 +41,7 @@ const (
 	TokenIVarProps
 	TokenEndIVar
 	TokenLink
+	TokenUsrMarshal
 	TokenEOF
 )
 
@@ -61,6 +62,7 @@ var tokenNames = map[Token]string{
 	TokenIVarProps:  "TokenIVarProps",
 	TokenEndIVar:    "TokenEndIVar",
 	TokenLink:       "TokenLink",
+	TokenUsrMarshal: "TokenUsrMarshal",
 	TokenEOF:        "EOF",
 }
 
@@ -136,6 +138,7 @@ const (
 	ctxArray = iota
 	ctxHash
 	ctxIVar
+	ctxUsrMarshal
 )
 
 type parserStack []parserCtx
@@ -709,6 +712,15 @@ var typeParsers = []typeParserFn{
 		}
 		return
 	},
+	typeUsrMarshal: func(p *Parser) (tok Token, err error) {
+		tok = TokenUsrMarshal
+		start := p.pos - 1
+		// We only insert into the link table if we're the top level parser.
+		if p.lnkID == -1 {
+			p.lnkTbl.add(rng{start, p.pos})
+		}
+		return
+	},
 }
 
 type parserState func(*Parser) (Token, parserState, error)
@@ -741,6 +753,9 @@ func nextState(p *Parser, tok Token, next parserState) parserState {
 	case TokenStartIVar:
 		p.stack.push(ctxIVar, 0, next)
 		return parserStateIVarInit
+	case TokenUsrMarshal:
+		p.stack.push(ctxUsrMarshal, 0, next)
+		return parserStateUsrMarshalInit
 	}
 	return next
 }
@@ -967,6 +982,52 @@ func parserStateIVarEnd(p *Parser) (tok Token, next parserState, err error) {
 		cur.r.end = p.pos
 	}
 	tok = TokenEndIVar
+	next = p.stack.pop()
+	return
+}
+
+func parserStateUsrMarshalInit(p *Parser) (tok Token, next parserState, err error) {
+	cur := p.stack.cur()
+	if cur.typ != ctxUsrMarshal {
+		err = errors.Errorf("expected top of stack to be usrMarshal, got %d", cur.typ)
+		return
+	}
+
+	tok, err = p.readNext()
+	if err != nil {
+		return
+	} else if tok != TokenSymbol {
+		err = errors.Errorf("expected next token for usrmarshal object to be Symbol, got %s", tok)
+		return
+	}
+
+	next = parserStateUsrMarshalVal
+	return
+}
+
+func parserStateUsrMarshalVal(p *Parser) (tok Token, next parserState, err error) {
+	cur := p.stack.cur()
+	if cur.typ != ctxUsrMarshal {
+		err = errors.Errorf("expected top of stack to be usrMarshal, got %d", cur.typ)
+		return
+	}
+
+	tok, err = p.readNext()
+	if err != nil {
+		return
+	}
+
+	next = nextState(p, tok, parserStateUsrMarshalEnd)
+	return
+}
+
+func parserStateUsrMarshalEnd(p *Parser) (tok Token, next parserState, err error) {
+	cur := p.stack.cur()
+	if cur.typ != ctxUsrMarshal {
+		err = errors.Errorf("expected top of stack to be usrMarshal, got %d", cur.typ)
+		return
+	}
+
 	next = p.stack.pop()
 	return
 }

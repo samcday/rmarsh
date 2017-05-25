@@ -419,7 +419,7 @@ func TestParserIVarArray(t *testing.T) {
 
 	expectToken(t, p, rmarsh.TokenIVarProps)
 	if p.Len() != 1 {
-		t.Errorf("p.Text() = %d, expected 1", p.Len())
+		t.Errorf("p.Len() = %d, expected 1", p.Len())
 	}
 
 	expectToken(t, p, rmarsh.TokenSymbol)
@@ -442,7 +442,7 @@ func TestParserIVarHash(t *testing.T) {
 
 	expectToken(t, p, rmarsh.TokenIVarProps)
 	if p.Len() != 1 {
-		t.Errorf("p.Text() = %d, expected 1", p.Len())
+		t.Errorf("p.Len() = %d, expected 1", p.Len())
 	}
 
 	expectToken(t, p, rmarsh.TokenSymbol)
@@ -458,7 +458,7 @@ func TestParserIVarString(t *testing.T) {
 
 	expectToken(t, p, rmarsh.TokenIVarProps)
 	if p.Len() != 1 {
-		t.Errorf("p.Text() = %d, expected 1", p.Len())
+		t.Errorf("p.Len() = %d, expected 1", p.Len())
 	}
 
 	expectToken(t, p, rmarsh.TokenSymbol)
@@ -596,28 +596,23 @@ func TestParserReplayContrived(t *testing.T) {
 	expectToken(t, sub2, rmarsh.TokenEOF)
 }
 
-// func TestParserReplayIVar(t *testing.T) {
-// 	p := parseFromRuby(t, `["test", 321]`)
+func TestParserUsrMarshaal(t *testing.T) {
+	p := parseFromRuby(t, `Gem::Version.new('1.2.3')`)
 
-// 	expectToken(t, p, rmarsh.TokenStartArray)
-// 	expectToken(t, p, rmarsh.TokenStartIVar)
-// 	expectToken(t, p, rmarsh.TokenString)
-// 	expectToken(t, p, rmarsh.TokenSymbol)
-// 	expectToken(t, p, rmarsh.TokenTrue)
-// 	expectToken(t, p, rmarsh.TokenEndIVar)
-// 	expectToken(t, p, rmarsh.TokenFixnum)
-// 	expectToken(t, p, rmarsh.TokenEndArray)
-// 	expectToken(t, p, rmarsh.TokenEOF)
-
-// 	sub, err := p.Replay(1)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-
-// 	expectToken(t, sub, rmarsh.TokenStartIVar)
-// 	expectToken(t, sub, rmarsh.TokenString)
-// 	expectToken(t, sub, rmarsh.TokenSymbol)
-// 	expectToken(t, sub, rmarsh.TokenTrue)
-// 	expectToken(t, sub, rmarsh.TokenEndIVar)
-// 	expectToken(t, sub, rmarsh.TokenEOF)
-// }
+	expectToken(t, p, rmarsh.TokenUsrMarshal)
+	expectToken(t, p, rmarsh.TokenSymbol)
+	if str, err := p.Text(); err != nil {
+		t.Fatal(err)
+	} else if str != "Gem::Version" {
+		t.Errorf("p.Text() = %s, expected @test", str)
+	}
+	expectToken(t, p, rmarsh.TokenStartArray)
+	expectToken(t, p, rmarsh.TokenStartIVar)
+	expectToken(t, p, rmarsh.TokenString)
+	expectToken(t, p, rmarsh.TokenIVarProps)
+	expectToken(t, p, rmarsh.TokenSymbol)
+	expectToken(t, p, rmarsh.TokenTrue)
+	expectToken(t, p, rmarsh.TokenEndIVar)
+	expectToken(t, p, rmarsh.TokenEndArray)
+	expectToken(t, p, rmarsh.TokenEOF)
+}
