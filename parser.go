@@ -58,6 +58,7 @@ var tokenNames = map[Token]string{
 	TokenStartHash:  "TokenStartHash",
 	TokenEndHash:    "TokenEndHash",
 	TokenStartIVar:  "TokenStartIVar",
+	TokenIVarProps:  "TokenIVarProps",
 	TokenEndIVar:    "TokenEndIVar",
 	TokenLink:       "TokenLink",
 	TokenEOF:        "EOF",
@@ -275,7 +276,7 @@ func (p *Parser) ExpectNext(exp Token) error {
 func (p *Parser) Skip() (err error) {
 	var depth int
 	switch p.cur {
-	case TokenStartArray, TokenStartHash, TokenStartIVar:
+	case TokenStartArray, TokenStartHash, TokenStartIVar, TokenIVarProps:
 		depth++
 	}
 
@@ -297,10 +298,10 @@ func (p *Parser) Skip() (err error) {
 }
 
 // Len returns the number of elements to be read in the current structure.
-// Returns 0 if the current token is not TokenStartArray, TokenStartHash, etc.
+// Returns -1 if the current token is not TokenStartArray, TokenStartHash, etc.
 func (p *Parser) Len() int {
-	if p.cur != TokenStartArray && p.cur != TokenStartHash {
-		return 0
+	if p.cur != TokenStartArray && p.cur != TokenStartHash && p.cur != TokenIVarProps {
+		return -1
 	}
 
 	return p.stack.cur().sz
@@ -903,6 +904,8 @@ func parserStateIVarLen(p *Parser) (tok Token, next parserState, err error) {
 	if err != nil {
 		return
 	}
+
+	tok = TokenIVarProps
 
 	if cur.sz == 0 {
 		next = parserStateIVarEnd

@@ -196,12 +196,14 @@ func stringDecoder(d *Decoder, v reflect.Value) error {
 	}
 
 	switch tok {
-	case TokenIVar:
+	case TokenStartIVar:
 		// We're okay with an IVar as long as the next token is a String.
 		if err := d.p.ExpectNext(TokenString); err != nil {
-
+			return err
 		}
-
+		// TODO: properly parse IVar. For now, we just skip over encoding and such.
+		d.p.Skip()
+		return nil
 	case TokenString, TokenSymbol:
 		str, err := d.p.Text()
 		if err != nil {

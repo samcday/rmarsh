@@ -417,6 +417,11 @@ func TestParserIVarArray(t *testing.T) {
 	expectToken(t, p, rmarsh.TokenStartArray)
 	expectToken(t, p, rmarsh.TokenEndArray)
 
+	expectToken(t, p, rmarsh.TokenIVarProps)
+	if p.Len() != 1 {
+		t.Errorf("p.Text() = %d, expected 1", p.Len())
+	}
+
 	expectToken(t, p, rmarsh.TokenSymbol)
 	if str, err := p.Text(); err != nil {
 		t.Fatal(err)
@@ -435,6 +440,11 @@ func TestParserIVarHash(t *testing.T) {
 	expectToken(t, p, rmarsh.TokenStartHash)
 	expectToken(t, p, rmarsh.TokenEndHash)
 
+	expectToken(t, p, rmarsh.TokenIVarProps)
+	if p.Len() != 1 {
+		t.Errorf("p.Text() = %d, expected 1", p.Len())
+	}
+
 	expectToken(t, p, rmarsh.TokenSymbol)
 	expectToken(t, p, rmarsh.TokenFixnum)
 	expectToken(t, p, rmarsh.TokenEndIVar)
@@ -445,6 +455,12 @@ func TestParserIVarString(t *testing.T) {
 	p := parseFromRuby(t, `"test"`)
 	expectToken(t, p, rmarsh.TokenStartIVar)
 	expectToken(t, p, rmarsh.TokenString)
+
+	expectToken(t, p, rmarsh.TokenIVarProps)
+	if p.Len() != 1 {
+		t.Errorf("p.Text() = %d, expected 1", p.Len())
+	}
+
 	expectToken(t, p, rmarsh.TokenSymbol)
 	if str, err := p.Text(); err != nil {
 		t.Fatal(err)
@@ -533,6 +549,7 @@ func TestParserReplayIVarString(t *testing.T) {
 	p := parseFromRuby(t, `"test"`)
 	expectToken(t, p, rmarsh.TokenStartIVar)
 	expectToken(t, p, rmarsh.TokenString)
+	expectToken(t, p, rmarsh.TokenIVarProps)
 	expectToken(t, p, rmarsh.TokenSymbol)
 	expectToken(t, p, rmarsh.TokenTrue)
 	expectToken(t, p, rmarsh.TokenEndIVar)
@@ -544,6 +561,7 @@ func TestParserReplayIVarString(t *testing.T) {
 	}
 	expectToken(t, sub, rmarsh.TokenStartIVar)
 	expectToken(t, sub, rmarsh.TokenString)
+	expectToken(t, sub, rmarsh.TokenIVarProps)
 	expectToken(t, sub, rmarsh.TokenSymbol)
 	expectToken(t, sub, rmarsh.TokenTrue)
 	expectToken(t, sub, rmarsh.TokenEndIVar)
