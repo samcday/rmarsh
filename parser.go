@@ -532,7 +532,7 @@ func (p *Parser) long() (n int, err error) {
 func (p *Parser) fill(num int) (err error) {
 	// We don't do actual reads in sub Parser, the data is already in the buffer.
 	if p.lnkID > -1 {
-		return nil
+		return errors.Errorf("fill() called on replay Parser")
 	}
 
 	// Optimisation: if our current stack gives us confidence there *must* be more data to read
@@ -540,8 +540,11 @@ func (p *Parser) fill(num int) (err error) {
 	// then we add an extra byte to what we read now. This avoids extra read calls for the
 	// subsequent type byte.
 	for i := len(p.stack) - 1; i >= 0; i-- {
-		if p.stack[i].sz > 0 && p.stack[i].pos < p.stack[i].sz-1 {
-			num++
+		if p.stack[i].sz > 0 {
+			extra := p.stack[i].sz - p.stack[i].pos - 1
+			if extra > 0 {
+				num += extra
+			}
 		}
 	}
 
@@ -549,8 +552,12 @@ func (p *Parser) fill(num int) (err error) {
 	p.end += num
 
 	if to > len(p.buf) {
-		// Overflowed our read buffer, allocate a new one double the size,
-		buf := make([]byte, len(p.buf)*2)
+		// Overflowed our read buffer, allocate a new one double the current size, or the required size if it's larger.
+		newSz := len(p.buf) * 2
+		if newSz < to {
+			newSz = to
+		}
+		buf := make([]byte, newSz)
 		copy(buf, p.buf)
 		p.buf = buf
 	}
@@ -594,9 +601,11 @@ var typeParsers = []typeParserFn{
 		tok = TokenFloat
 
 		// Float will be at least 2 more bytes - 1 for len and 1 for a digit
-		if err = p.fill(2); err != nil {
-			err = errors.Wrap(err, "float")
-			return
+		if p.pos+2 > p.end {
+			if err = p.fill(p.pos + 2 - p.end); err != nil {
+				err = errors.Wrap(err, "float")
+				return
+			}
 		}
 
 		if p.ctx, err = p.sizedBlob(false); err != nil {
@@ -615,9 +624,11 @@ var typeParsers = []typeParserFn{
 		tok = TokenBignum
 
 		// Bignum will have at least 3 more bytes - 1 for sign, 1 for len and at least 1 digit.
-		if err = p.fill(3); err != nil {
-			err = errors.Wrap(err, "bignum")
-			return
+		if p.pos+3 > p.end {
+			if err = p.fill(p.pos + 3 - p.end); err != nil {
+				err = errors.Wrap(err, "bignum")
+				return
+			}
 		}
 
 		p.bnumsign = p.buf[p.pos]
@@ -638,9 +649,11 @@ var typeParsers = []typeParserFn{
 		tok = TokenSymbol
 
 		// Symbol will be at least 2 more bytes - 1 for len and 1 for a char.
-		if err = p.fill(2); err != nil {
-			err = errors.Wrap(err, "symbol")
-			return
+		if p.pos+2 > p.end {
+			if err = p.fill(p.pos + 2 - p.end); err != nil {
+				err = errors.Wrap(err, "bignum")
+				return
+			}
 		}
 
 		p.ctx, err = p.sizedBlob(false)
