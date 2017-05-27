@@ -535,16 +535,12 @@ func (p *Parser) fill(num int) (err error) {
 		return errors.Errorf("fill() called on replay Parser")
 	}
 
-	// Optimisation: if our current stack gives us confidence there *must* be more data to read
-	// (i.e we're in an array/hash/ivar and processing anything but the last item)
-	// then we add an extra byte to what we read now. This avoids extra read calls for the
-	// subsequent type byte.
+	// Whenever we go to pull bytes from the source, we prefetch as much as possible. We do this by examining the current
+	// stack. For example if we're processing an array with 500 elements and we've currently parsing element 232, then we
+	// know there's at *least* 267 bytes to come (even if every following element was just a single nil byte).
 	for i := len(p.stack) - 1; i >= 0; i-- {
-		if p.stack[i].sz > 0 {
-			extra := p.stack[i].sz - p.stack[i].pos - 1
-			if extra > 0 {
-				num += extra
-			}
+		if n := p.stack[i].sz - p.stack[i].pos - 1; n > 0 {
+			num += n
 		}
 	}
 
