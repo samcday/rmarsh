@@ -154,3 +154,79 @@ func TestDecoderArrayLink(t *testing.T) {
 		t.Errorf("ptrs do not match: %+v vs %+v", arr[0], arr[1])
 	}
 }
+
+func TestDecoderStringLinkSafety(t *testing.T) {
+	r := bytes.NewBuffer(rbEncode(t, `s = "test"; s2 = "foo"; [s, s, s2, s]`))
+	p := rmarsh.NewParser(r)
+
+	expectToken(t, p, rmarsh.TokenStartArray)
+
+	dec := rmarsh.NewDecoder(p)
+
+	var s string
+	if err := dec.Decode(&s); err != nil {
+		t.Fatal(err)
+	}
+	if s != "test" {
+		t.Fatalf(`%s != "test"`, s)
+	}
+
+	if err := dec.Decode(&s); err != nil {
+		t.Fatal(err)
+	}
+	if s != "test" {
+		t.Fatalf(`%s != "test"`, s)
+	}
+
+	if err := dec.Decode(&s); err != nil {
+		t.Fatal(err)
+	}
+	if s != "foo" {
+		t.Fatalf(`%s != "foo"`, s)
+	}
+
+	if err := dec.Decode(&s); err != nil {
+		t.Fatal(err)
+	}
+	if s != "test" {
+		t.Fatalf(`%s != "test"`, s)
+	}
+}
+
+func TestDecoderPtrLinkSafety(t *testing.T) {
+	r := bytes.NewBuffer(rbEncode(t, `s = "test"; s2 = "foo"; [s, s, s2, s]`))
+	p := rmarsh.NewParser(r)
+
+	expectToken(t, p, rmarsh.TokenStartArray)
+
+	dec := rmarsh.NewDecoder(p)
+
+	var s *string
+	if err := dec.Decode(&s); err != nil {
+		t.Fatal(err)
+	}
+	if *s != "test" {
+		t.Fatalf(`%s != "test"`, *s)
+	}
+
+	if err := dec.Decode(&s); err != nil {
+		t.Fatal(err)
+	}
+	if *s != "test" {
+		t.Fatalf(`%s != "test"`, *s)
+	}
+
+	if err := dec.Decode(&s); err != nil {
+		t.Fatal(err)
+	}
+	if *s != "foo" {
+		t.Fatalf(`%s != "foo"`, *s)
+	}
+
+	if err := dec.Decode(&s); err != nil {
+		t.Fatal(err)
+	}
+	if *s != "test" {
+		t.Fatalf(`%s != "test"`, *s)
+	}
+}

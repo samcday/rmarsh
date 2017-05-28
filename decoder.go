@@ -189,67 +189,64 @@ func floatDecoder(d *Decoder, v reflect.Value) error {
 	}
 }
 
-func stringDecoder(d *Decoder, v reflect.Value) error {
-	tok, err := d.nextToken()
+func stringDecoder(d *Decoder, v reflect.Value) (err error) {
+	var tok Token
+
+	tok, err = d.nextToken()
 	if err != nil {
-		return err
+		return
 	}
 
-	switch tok {
-	case TokenLink:
+	if tok == TokenLink {
 		lnkID := d.p.LinkID()
 		cached, ok := d.objCache[lnkID]
 		if ok {
 			if cached.Elem().Kind() == reflect.String {
 				v.SetString(cached.Elem().String())
-				return nil
+				return
 			}
 		}
-		return fmt.Errorf("Unknown link id %d", lnkID)
-	case TokenStartIVar:
-		lnkID := d.p.LinkID()
+		err = fmt.Errorf("Unknown link id %d", lnkID)
+		return
+	}
 
-		// We're okay with an IVar as long as the next token is a String.
-		if err := d.p.ExpectNext(TokenString); err != nil {
-			return err
-		}
+	isIVar := tok == TokenStartIVar
+	lnkID := d.p.LinkID()
 
-		str, err := d.p.Text()
+	if isIVar {
+		tok, err = d.p.Next()
 		if err != nil {
-			return err
+			return
 		}
-		v.SetString(str)
+	}
 
-		_, ok := d.objCache[lnkID]
-		if !ok {
-			d.objCache[lnkID] = v.Addr()
-		}
-
-		if err := d.p.ExpectNext(TokenIVarProps); err != nil {
-			return err
-		}
-		// TODO: properly parse IVar. For now, we just skip over encoding and such.
-		if err := d.p.Skip(); err != nil {
-			return err
-		}
-		return nil
-	case TokenString, TokenSymbol:
-		str, err := d.p.Text()
-		if err != nil {
-			return err
-		}
-		v.SetString(str)
-
-		lnkID := d.p.LinkID()
-		_, ok := d.objCache[lnkID]
-		if !ok {
-			d.objCache[lnkID] = v.Addr()
-		}
-
-		return nil
-	default:
+	if tok != TokenString && tok != TokenSymbol {
 		return fmt.Errorf("Unexpected token %v encountered while decoding string", tok)
 	}
+
+	var str string
+	str, err = d.p.Text()
+	if err != nil {
+		return
+	}
+	v.SetString(str)
+
+	_, ok := d.objCache[lnkID]
+	if !ok {
+		cacheV := reflect.New(v.Type())
+		cacheV.Elem().SetString(str)
+		d.objCache[lnkID] = cacheV
+	}
+
+	if isIVar {
+		// TODO: properly parse IVar. For now, we just skip over encoding and such.
+		if err = d.p.ExpectNext(TokenIVarProps); err != nil {
+			return
+		}
+		err = d.p.Skip()
+	}
+
+	return
 }
 
 type sliceDecoder struct {
@@ -432,18 +429,21 @@ func (ptrDec *ptrDecoder) decode(d *Decoder, v reflect.Value) error {
 		return fmt.Errorf("Unhandled link encountered. %d", lnkID)
 	}
 
+	v.Set(reflect.New(v.Type().Elem()))
+
 	// Push the token back and decode against resolved ptr.
 	d.curToken = tok
 
-	// Initialize the pointer to a new empty value.
-	v.Set(reflect.New(v.Type().Elem()))
-
 	lnkID := d.p.LinkID()
-	if lnkID > -1 {
-		d.objCache[lnkID] = v
+	if _, ok := d.objCache[lnkID]; !ok {
+		cacheV := reflect.New(v.Type()).Elem()
+		cacheV.Set(v)
+		d.objCache[lnkID] = cacheV
 	}
 
-	return ptrDec.elemDec(d, v.Elem())
+	err = ptrDec.elemDec(d, v.Elem())
+
+	return err
 }
 
 func newPtrDecoder(t reflect.Type) decoderFunc {
