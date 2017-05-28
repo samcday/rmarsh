@@ -105,10 +105,13 @@ type cyclicReader struct {
 	sz  int
 }
 
-func (r *cyclicReader) Read(b []byte) (int, error) {
-	n := copy(b, r.b[r.off:])
-	r.off += n
-	if r.off >= r.sz {
+func (r *cyclicReader) Read(b []byte) (n int, err error) {
+	n = len(b)
+	for i := 0; i < n; i++ {
+		b[i] = r.b[r.off]
+		r.off++
+	}
+	if r.off == r.sz {
 		r.off = 0
 	}
 	return n, nil

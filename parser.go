@@ -84,10 +84,11 @@ type Parser struct {
 	lnkID  int // id of the linked object this Parser is replaying
 	parent *Parser
 
-	buf []byte // The read buffer contains every bit of data that we've read for the stream.
-	end int    // Where we've read up to the buffer
-	pos int    // Our read position in the read buffer
-	ctx rng    // Range of the raw data for the current token
+	buf    []byte // The read buffer contains every bit of data that we've read for the stream.
+	buflen int    // Current size of the buffer.
+	end    int    // Where we've read up to the buffer
+	pos    int    // Our read position in the read buffer
+	ctx    rng    // Range of the raw data for the current token
 
 	num      int
 	bnumbits []big.Word
@@ -181,10 +182,11 @@ func (stk *parserStack) pop() (next parserState) {
 // Reader is buffered, or wrap it in a bufio.Reader.
 func NewParser(r io.Reader) *Parser {
 	p := &Parser{
-		r:     r,
-		buf:   make([]byte, bufInitSz),
-		st:    parserStateTopLevel,
-		lnkID: -1,
+		r:      r,
+		buf:    make([]byte, bufInitSz),
+		buflen: bufInitSz,
+		st:     parserStateTopLevel,
+		lnkID:  -1,
 	}
 	return p
 }
@@ -272,14 +274,22 @@ func (p *Parser) Next() (tok Token, err error) {
 }
 
 // ExpectNext is a convenience method that calls Next() and ensures the next token is the one provided.
-func (p *Parser) ExpectNext(exp Token) error {
-	tok, err := p.Next()
-	if err != nil {
-		return err
+func (p *Parser) ExpectNext(exp Token) (err error) {
+	// A couple of state transitions don't yield a token. We pump the transitions until we get one.
+	var tok Token
+	for tok == tokenInvalid {
+		tok, p.st, err = p.st(p)
+		if err != nil {
+			return
+		}
 	}
+
 	if tok != exp {
-		return errors.Errorf("rmarsh.Parser.ExpectNext(): read token %s, expected %s", tok, exp)
+		err = errors.Errorf("rmarsh.Parser.ExpectNext(): read token %s, expected %s", tok, exp)
+		return
 	}
+
+	p.cur = tok
 	return nil
 }
 
@@ -462,7 +472,6 @@ func (p *Parser) UnsafeText() (string, error) {
 		bytesHeader := (*reflect.SliceHeader)(unsafe.Pointer(&buf))
 		strHeader := reflect.StringHeader{Data: bytesHeader.Data, Len: bytesHeader.Len}
 		return *(*string)(unsafe.Pointer(&strHeader)), nil
-		// return string(), nil
 	}
 	return "", errors.Errorf("rmarsh.Parser.Text() called for wrong token: %s", p.cur)
 }
@@ -470,8 +479,10 @@ func (p *Parser) UnsafeText() (string, error) {
 // Reads the next value in the stream.
 func (p *Parser) readNext() (tok Token, err error) {
 	if p.pos == p.end {
+		// This is the worst possible situation to be in - we have to go to the io.Reader to pull a single byte.
+		// This situation shouldn't occur very often on real world streams - as we should usually have enough to context to
+		// be doing safe read aheads.
 		err = p.fill(1)
-		// TODO: should only transition to EOF if we were actually expecting it yo.
 		if err != nil {
 			err = errors.Wrap(err, "read type id")
 			return
@@ -735,23 +746,23 @@ func (p *Parser) fill(num int) (err error) {
 	}
 
 	from, to := p.end, p.end+num
-	p.end += num
 
-	if to > len(p.buf) {
+	if to > p.buflen {
 		// Overflowed our read buffer, allocate a new one double the current size, or the required size if it's larger.
-		newSz := len(p.buf) * 2
-		if newSz < to {
-			newSz = to
+		p.buflen = p.buflen * 2
+		if p.buflen < to {
+			p.buflen = to
 		}
-		buf := make([]byte, newSz)
-		copy(buf, p.buf)
+		buf := make([]byte, p.buflen)
+		copy(buf, p.buf[0:p.end])
 		p.buf = buf
 	}
 
-	var rd, n int
-	for rd < num && err == nil {
+	p.end += num
+
+	var n int
+	for from < to && err == nil {
 		n, err = p.r.Read(p.buf[from:to])
-		rd += n
 		from += n
 	}
 	if err == io.EOF {
