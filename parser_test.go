@@ -58,8 +58,10 @@ func BenchmarkParserNil(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		p.Reset(nil)
 
-		if err := p.ExpectNext(rmarsh.TokenNil); err != nil {
+		if tok, err := p.Next(); err != nil {
 			b.Fatal(err)
+		} else if tok != rmarsh.TokenNil {
+			b.Fatalf("Wrong token %s", tok)
 		}
 	}
 }
@@ -81,8 +83,10 @@ func BenchmarkParserBool(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		p.Reset(nil)
 
-		if err := p.ExpectNext(rmarsh.TokenTrue); err != nil {
+		if tok, err := p.Next(); err != nil {
 			b.Fatal(err)
+		} else if tok != rmarsh.TokenTrue {
+			b.Fatalf("Unexpected token %s", tok)
 		}
 	}
 }
@@ -128,8 +132,10 @@ func BenchmarkParserFixnumSingleByte(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		p.Reset(nil)
 
-		if err := p.ExpectNext(rmarsh.TokenFixnum); err != nil {
+		if tok, err := p.Next(); err != nil {
 			b.Fatal(err)
+		} else if tok != rmarsh.TokenFixnum {
+			b.Fatalf("Unexpected token %s", tok)
 		}
 		if n, err := p.Int(); err != nil || n != 100 {
 			b.Fatalf("%v %v", n, err)
@@ -143,8 +149,10 @@ func BenchmarkParserFixnumMultiByte(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		p.Reset(nil)
 
-		if err := p.ExpectNext(rmarsh.TokenFixnum); err != nil {
+		if tok, err := p.Next(); err != nil {
 			b.Fatal(err)
+		} else if tok != rmarsh.TokenFixnum {
+			b.Fatalf("Unexpected token %s", tok)
 		}
 		if n, err := p.Int(); err != nil || n != 0xBEEF {
 			b.Fatalf("%v %v", n, err)
@@ -176,8 +184,10 @@ func BenchmarkParserFloatSingleByte(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		p.Reset(nil)
 
-		if err := p.ExpectNext(rmarsh.TokenFloat); err != nil {
+		if tok, err := p.Next(); err != nil {
 			b.Fatal(err)
+		} else if tok != rmarsh.TokenFloat {
+			b.Fatalf("Unexpected token %s", tok)
 		}
 		if f, err := p.Float(); err != nil || f != 1 {
 			b.Fatalf("%v %v", f, err)
@@ -192,8 +202,10 @@ func BenchmarkParserFloatMultiByte(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		p.Reset(nil)
 
-		if err := p.ExpectNext(rmarsh.TokenFloat); err != nil {
+		if tok, err := p.Next(); err != nil {
 			b.Fatal(err)
+		} else if tok != rmarsh.TokenFloat {
+			b.Fatalf("Unexpected token %s", tok)
 		}
 		if f, err := p.Float(); err != nil || f != 123.321 {
 			b.Fatalf("%v %v", f, err)
@@ -225,8 +237,10 @@ func BenchmarkParserBignum(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		p.Reset(nil)
 
-		if err := p.ExpectNext(rmarsh.TokenBignum); err != nil {
+		if tok, err := p.Next(); err != nil {
 			b.Fatal(err)
+		} else if tok != rmarsh.TokenBignum {
+			b.Fatalf("Unexpected token %s", tok)
 		}
 		if _, err := p.Bignum(); err != nil {
 			b.Fatal(err)
@@ -253,8 +267,10 @@ func BenchmarkParserSymbolSingleByte(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		p.Reset(nil)
 
-		if err := p.ExpectNext(rmarsh.TokenSymbol); err != nil {
+		if tok, err := p.Next(); err != nil {
 			b.Fatal(err)
+		} else if tok != rmarsh.TokenSymbol {
+			b.Fatalf("Unexpected token %s", tok)
 		}
 		if !bytes.Equal(p.UnsafeBytes(), exp) {
 			b.Fatalf("%s != test", p.UnsafeBytes())
@@ -270,8 +286,10 @@ func BenchmarkParserSymbolMultiByte(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		p.Reset(nil)
 
-		if err := p.ExpectNext(rmarsh.TokenSymbol); err != nil {
+		if tok, err := p.Next(); err != nil {
 			b.Fatal(err)
+		} else if tok != rmarsh.TokenSymbol {
+			b.Fatalf("Unexpected token %s", tok)
 		}
 		if !bytes.Equal(p.UnsafeBytes(), exp) {
 			b.Fatalf("%s != test", p.UnsafeBytes())
@@ -299,8 +317,10 @@ func BenchmarkParserString(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		p.Reset(nil)
 
-		if err := p.ExpectNext(rmarsh.TokenString); err != nil {
+		if tok, err := p.Next(); err != nil {
 			b.Fatal(err)
+		} else if tok != rmarsh.TokenString {
+			b.Fatalf("Unexpected token %s", tok)
 		}
 		if !bytes.Equal(p.UnsafeBytes(), exp) {
 			b.Fatalf("%s != test", p.UnsafeBytes())
@@ -322,11 +342,15 @@ func BenchmarkParserEmptyArray(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		p.Reset(nil)
 
-		if err := p.ExpectNext(rmarsh.TokenStartArray); err != nil {
+		if tok, err := p.Next(); err != nil {
 			b.Fatal(err)
+		} else if tok != rmarsh.TokenStartArray {
+			b.Fatalf("Unexpected token %s", tok)
 		}
-		if err := p.ExpectNext(rmarsh.TokenEndArray); err != nil {
+		if tok, err := p.Next(); err != nil {
 			b.Fatal(err)
+		} else if tok != rmarsh.TokenEndArray {
+			b.Fatalf("Unexpected token %s", tok)
 		}
 	}
 }
@@ -371,20 +395,28 @@ func BenchmarkParserSymlink(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		p.Reset(nil)
 
-		if err := p.ExpectNext(rmarsh.TokenStartArray); err != nil {
+		if tok, err := p.Next(); err != nil {
 			b.Fatal(err)
+		} else if tok != rmarsh.TokenStartArray {
+			b.Fatalf("Unexpected token %s", tok)
 		}
-		if err := p.ExpectNext(rmarsh.TokenSymbol); err != nil {
+		if tok, err := p.Next(); err != nil {
 			b.Fatal(err)
+		} else if tok != rmarsh.TokenSymbol {
+			b.Fatalf("Unexpected token %s", tok)
 		}
-		if err := p.ExpectNext(rmarsh.TokenSymbol); err != nil {
+		if tok, err := p.Next(); err != nil {
 			b.Fatal(err)
+		} else if tok != rmarsh.TokenSymbol {
+			b.Fatalf("Unexpected token %s", tok)
 		}
 		if !bytes.Equal(p.UnsafeBytes(), exp) {
 			b.Fatalf("%s != test", p.UnsafeBytes())
 		}
-		if err := p.ExpectNext(rmarsh.TokenEndArray); err != nil {
+		if tok, err := p.Next(); err != nil {
 			b.Fatal(err)
+		} else if tok != rmarsh.TokenEndArray {
+			b.Fatalf("Unexpected token %s", tok)
 		}
 	}
 }
