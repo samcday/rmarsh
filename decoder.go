@@ -220,9 +220,9 @@ func stringDecoder(d *Decoder, v reflect.Value) error {
 		}
 		v.SetString(str)
 
-		if lnkID > -1 {
-			d.objCache[lnkID] = reflect.New(v.Type())
-			d.objCache[lnkID].Elem().SetString(str)
+		_, ok := d.objCache[lnkID]
+		if !ok {
+			d.objCache[lnkID] = v.Addr()
 		}
 
 		if err := d.p.ExpectNext(TokenIVarProps); err != nil {
@@ -241,9 +241,9 @@ func stringDecoder(d *Decoder, v reflect.Value) error {
 		v.SetString(str)
 
 		lnkID := d.p.LinkID()
-		if lnkID > -1 {
-			d.objCache[lnkID] = reflect.New(v.Type())
-			d.objCache[lnkID].Elem().SetString(str)
+		_, ok := d.objCache[lnkID]
+		if !ok {
+			d.objCache[lnkID] = v.Addr()
 		}
 
 		return nil
@@ -435,8 +435,13 @@ func (ptrDec *ptrDecoder) decode(d *Decoder, v reflect.Value) error {
 	// Push the token back and decode against resolved ptr.
 	d.curToken = tok
 
-	// Initialze the pointer to a new empty value.
+	// Initialize the pointer to a new empty value.
 	v.Set(reflect.New(v.Type().Elem()))
+
+	lnkID := d.p.LinkID()
+	if lnkID > -1 {
+		d.objCache[lnkID] = v
+	}
 
 	return ptrDec.elemDec(d, v.Elem())
 }

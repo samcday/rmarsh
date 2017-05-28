@@ -142,7 +142,7 @@ func TestDecoderStringLink(t *testing.T) {
 	}
 
 	if s[0] != s[1] {
-		t.Error("ptrs do not match")
+		t.Errorf("ptrs do not match: %+v vs %+v", s[0], s[1])
 	}
 }
 
@@ -151,6 +151,6 @@ func TestDecoderArrayLink(t *testing.T) {
 	testDecoder(t, `a = [123]; [a,a]`, &arr)
 
 	if arr[0] != arr[1] {
-		t.Error("ptrs do not match")
+		t.Errorf("ptrs do not match: %+v vs %+v", arr[0], arr[1])
 	}
 }
