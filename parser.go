@@ -443,13 +443,165 @@ func (p *Parser) readNext() (tok Token, err error) {
 	typ := p.buf[p.pos]
 	p.pos++
 
-	fn := typeParsers[typ]
-	if fn == nil {
+	switch typ {
+	case typeNil:
+		tok = TokenNil
+		return
+	case typeTrue:
+		tok = TokenTrue
+		return
+	case typeFalse:
+		tok = TokenFalse
+		return
+	case typeFixnum:
+		tok = TokenFixnum
+		p.num, err = p.long()
+		if err != nil {
+			err = errors.Wrap(err, "fixnum")
+		}
+		return
+	case typeFloat:
+		start := p.pos - 1
+		tok = TokenFloat
+
+		// Float will be at least 2 more bytes - 1 for len and 1 for a digit
+		if p.pos+2 > p.end {
+			if err = p.fill(p.pos + 2 - p.end); err != nil {
+				err = errors.Wrap(err, "float")
+				return
+			}
+		}
+
+		if p.ctx, err = p.sizedBlob(false); err != nil {
+			err = errors.Wrap(err, "float")
+			return
+		}
+
+		// We only insert into the link table if we're the top level parser.
+		if p.lnkID == -1 {
+			p.lnkTbl.add(rng{start, p.pos})
+		}
+		return
+	case typeBignum:
+		start := p.pos - 1
+		tok = TokenBignum
+
+		// Bignum will have at least 3 more bytes - 1 for sign, 1 for len and at least 1 digit.
+		if p.pos+3 > p.end {
+			if err = p.fill(p.pos + 3 - p.end); err != nil {
+				err = errors.Wrap(err, "bignum")
+				return
+			}
+		}
+
+		p.bnumsign = p.buf[p.pos]
+		p.pos++
+
+		if p.ctx, err = p.sizedBlob(true); err != nil {
+			err = errors.Wrap(err, "bignum")
+		}
+
+		// We only insert into the link table if we're the top level parser.
+		if p.lnkID == -1 {
+			p.lnkTbl.add(rng{start, p.pos})
+		}
+
+		return
+	case typeSymbol:
+		tok = TokenSymbol
+
+		// Symbol will be at least 2 more bytes - 1 for len and 1 for a char.
+		if p.pos+2 > p.end {
+			if err = p.fill(p.pos + 2 - p.end); err != nil {
+				err = errors.Wrap(err, "bignum")
+				return
+			}
+		}
+
+		p.ctx, err = p.sizedBlob(false)
+		if err != nil {
+			err = errors.Wrap(err, "symbol")
+			return
+		}
+
+		// We only insert into the symbol table if we're the top level parser.
+		if p.lnkID == -1 {
+			p.symTbl.add(p.ctx)
+		}
+		return
+	case typeString:
+		tok = TokenString
+		start := p.pos - 1
+		if p.ctx, err = p.sizedBlob(false); err != nil {
+			err = errors.Wrap(err, "string")
+		}
+		// We only insert into the link table if we're the top level parser.
+		if p.lnkID == -1 {
+			p.lnkTbl.add(rng{start, p.pos})
+		}
+		return
+	case typeSymlink:
+		tok = TokenSymbol
+		var n int
+		n, err = p.long()
+		if err != nil {
+			err = errors.Wrap(err, "symlink id")
+			return
+		}
+		if n >= len(p.symTbl) {
+			err = errors.Errorf("Symlink id %d is larger than max known %d", n, len(p.symTbl)-1)
+			return
+		}
+		p.ctx = p.symTbl[n]
+		return
+	case typeArray:
+		tok = TokenStartArray
+		start := p.pos - 1
+		p.num, err = p.long()
+		if err != nil {
+			err = errors.Wrap(err, "array")
+			return
+		}
+		// We only insert into the link table if we're the top level parser.
+		if p.lnkID == -1 {
+			p.lnkTbl.add(rng{start, 0})
+		}
+		return
+	case typeHash:
+		tok = TokenStartHash
+		start := p.pos - 1
+		p.num, err = p.long()
+		if err != nil {
+			err = errors.Wrap(err, "hash")
+			return
+		}
+		// We only insert into the link table if we're the top level parser.
+		if p.lnkID == -1 {
+			p.lnkTbl.add(rng{start, 0})
+		}
+		return
+	case typeIvar:
+		tok = TokenStartIVar
+		return
+	case typeLink:
+		tok = TokenLink
+		p.num, err = p.long()
+		if err != nil {
+			err = errors.Wrap(err, "link")
+		}
+		return
+	case typeUsrMarshal:
+		tok = TokenUsrMarshal
+		start := p.pos - 1
+		// We only insert into the link table if we're the top level parser.
+		if p.lnkID == -1 {
+			p.lnkTbl.add(rng{start, p.pos})
+		}
+		return
+	default:
 		err = errors.Errorf("Unhandled type %d encountered", typ)
 		return
 	}
-
-	return fn(p)
 }
 
 // Strings, Symbols, Floats, Bignums and the like all begin with an encoded long
@@ -570,176 +722,6 @@ func (p *Parser) fill(num int) (err error) {
 		err = errors.Wrap(err, "fill")
 	}
 	return
-}
-
-type typeParserFn func(*Parser) (Token, error)
-
-func staticParser(tok Token) typeParserFn {
-	return func(*Parser) (Token, error) {
-		return tok, nil
-	}
-}
-
-var typeParsers = []typeParserFn{
-	typeNil:   staticParser(TokenNil),
-	typeTrue:  staticParser(TokenTrue),
-	typeFalse: staticParser(TokenFalse),
-	typeFixnum: func(p *Parser) (tok Token, err error) {
-		tok = TokenFixnum
-		p.num, err = p.long()
-		if err != nil {
-			err = errors.Wrap(err, "fixnum")
-		}
-		return
-	},
-	typeFloat: func(p *Parser) (tok Token, err error) {
-		start := p.pos - 1
-		tok = TokenFloat
-
-		// Float will be at least 2 more bytes - 1 for len and 1 for a digit
-		if p.pos+2 > p.end {
-			if err = p.fill(p.pos + 2 - p.end); err != nil {
-				err = errors.Wrap(err, "float")
-				return
-			}
-		}
-
-		if p.ctx, err = p.sizedBlob(false); err != nil {
-			err = errors.Wrap(err, "float")
-			return
-		}
-
-		// We only insert into the link table if we're the top level parser.
-		if p.lnkID == -1 {
-			p.lnkTbl.add(rng{start, p.pos})
-		}
-		return
-	},
-	typeBignum: func(p *Parser) (tok Token, err error) {
-		start := p.pos - 1
-		tok = TokenBignum
-
-		// Bignum will have at least 3 more bytes - 1 for sign, 1 for len and at least 1 digit.
-		if p.pos+3 > p.end {
-			if err = p.fill(p.pos + 3 - p.end); err != nil {
-				err = errors.Wrap(err, "bignum")
-				return
-			}
-		}
-
-		p.bnumsign = p.buf[p.pos]
-		p.pos++
-
-		if p.ctx, err = p.sizedBlob(true); err != nil {
-			err = errors.Wrap(err, "bignum")
-		}
-
-		// We only insert into the link table if we're the top level parser.
-		if p.lnkID == -1 {
-			p.lnkTbl.add(rng{start, p.pos})
-		}
-
-		return
-	},
-	typeSymbol: func(p *Parser) (tok Token, err error) {
-		tok = TokenSymbol
-
-		// Symbol will be at least 2 more bytes - 1 for len and 1 for a char.
-		if p.pos+2 > p.end {
-			if err = p.fill(p.pos + 2 - p.end); err != nil {
-				err = errors.Wrap(err, "bignum")
-				return
-			}
-		}
-
-		p.ctx, err = p.sizedBlob(false)
-		if err != nil {
-			err = errors.Wrap(err, "symbol")
-			return
-		}
-
-		// We only insert into the symbol table if we're the top level parser.
-		if p.lnkID == -1 {
-			p.symTbl.add(p.ctx)
-		}
-		return
-	},
-	typeString: func(p *Parser) (tok Token, err error) {
-		tok = TokenString
-		start := p.pos - 1
-		if p.ctx, err = p.sizedBlob(false); err != nil {
-			err = errors.Wrap(err, "string")
-		}
-		// We only insert into the link table if we're the top level parser.
-		if p.lnkID == -1 {
-			p.lnkTbl.add(rng{start, p.pos})
-		}
-		return
-	},
-	typeSymlink: func(p *Parser) (tok Token, err error) {
-		tok = TokenSymbol
-		var n int
-		n, err = p.long()
-		if err != nil {
-			err = errors.Wrap(err, "symlink id")
-			return
-		}
-		if n >= len(p.symTbl) {
-			err = errors.Errorf("Symlink id %d is larger than max known %d", n, len(p.symTbl)-1)
-			return
-		}
-		p.ctx = p.symTbl[n]
-		return
-	},
-	typeArray: func(p *Parser) (tok Token, err error) {
-		tok = TokenStartArray
-		start := p.pos - 1
-		p.num, err = p.long()
-		if err != nil {
-			err = errors.Wrap(err, "array")
-			return
-		}
-		// We only insert into the link table if we're the top level parser.
-		if p.lnkID == -1 {
-			p.lnkTbl.add(rng{start, 0})
-		}
-		return
-	},
-	typeHash: func(p *Parser) (tok Token, err error) {
-		tok = TokenStartHash
-		start := p.pos - 1
-		p.num, err = p.long()
-		if err != nil {
-			err = errors.Wrap(err, "hash")
-			return
-		}
-		// We only insert into the link table if we're the top level parser.
-		if p.lnkID == -1 {
-			p.lnkTbl.add(rng{start, 0})
-		}
-		return
-	},
-	typeIvar: func(p *Parser) (tok Token, err error) {
-		tok = TokenStartIVar
-		return
-	},
-	typeLink: func(p *Parser) (tok Token, err error) {
-		tok = TokenLink
-		p.num, err = p.long()
-		if err != nil {
-			err = errors.Wrap(err, "link")
-		}
-		return
-	},
-	typeUsrMarshal: func(p *Parser) (tok Token, err error) {
-		tok = TokenUsrMarshal
-		start := p.pos - 1
-		// We only insert into the link table if we're the top level parser.
-		if p.lnkID == -1 {
-			p.lnkTbl.add(rng{start, p.pos})
-		}
-		return
-	},
 }
 
 type parserState func(*Parser) (Token, parserState, error)
