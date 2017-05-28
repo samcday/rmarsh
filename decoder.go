@@ -12,13 +12,13 @@ import (
 // A Decoder decodes a Ruby Marshal stream into concrete Golang structures.
 type Decoder struct {
 	p        *Parser
-	objCache []reflect.Value
+	objCache map[int]reflect.Value
 	curToken Token
 }
 
 // NewDecoder builds a new Decoder that uses given Parser to decode a Ruby Marshal stream.
 func NewDecoder(p *Parser) *Decoder {
-	return &Decoder{p: p}
+	return &Decoder{p: p, objCache: make(map[int]reflect.Value)}
 }
 
 // ReadValue will consume a full Ruby Marshal stream from the given io.Reader and return a fully decoded Golang object.
@@ -196,8 +196,16 @@ func stringDecoder(d *Decoder, v reflect.Value) error {
 	}
 
 	switch tok {
-	case TokenUsrMarshal:
-		return fmt.Errorf("nope")
+	case TokenLink:
+		lnkID := d.p.LinkID()
+		cached, ok := d.objCache[lnkID]
+		if ok {
+			if cached.Elem().Kind() == reflect.String {
+				v.Set(cached.Elem())
+				return nil
+			}
+		}
+		return fmt.Errorf("Unknown link id %d", lnkID)
 	case TokenStartIVar:
 		// We're okay with an IVar as long as the next token is a String.
 		if err := d.p.ExpectNext(TokenString); err != nil {
@@ -212,7 +220,7 @@ func stringDecoder(d *Decoder, v reflect.Value) error {
 
 		lnkID := d.p.LinkID()
 		if lnkID > -1 {
-			d.objCache = append(d.objCache, v.Addr())
+			d.objCache[lnkID] = v.Addr()
 		}
 
 		if err := d.p.ExpectNext(TokenIVarProps); err != nil {
@@ -232,7 +240,7 @@ func stringDecoder(d *Decoder, v reflect.Value) error {
 
 		lnkID := d.p.LinkID()
 		if lnkID > -1 {
-			d.objCache = append(d.objCache, v.Addr())
+			d.objCache[lnkID] = v.Addr()
 		}
 
 		return nil
@@ -269,7 +277,7 @@ func (sliceDec *sliceDecoder) decode(d *Decoder, v reflect.Value) error {
 
 	lnkID := d.p.LinkID()
 	if lnkID > -1 {
-		d.objCache = append(d.objCache, v.Addr())
+		d.objCache[lnkID] = v.Addr()
 	}
 
 	for i := 0; i < l; i++ {
