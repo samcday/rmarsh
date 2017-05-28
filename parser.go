@@ -5,7 +5,6 @@ import (
 	"io"
 	"math/big"
 	"reflect"
-	"runtime"
 	"strconv"
 	"unsafe"
 
@@ -79,7 +78,7 @@ type Parser struct {
 
 	cur Token // The token we have most recently parsed
 
-	st     parserState
+	state  parserState
 	stack  parserStack
 	lnkID  int // id of the linked object this Parser is replaying
 	parent *Parser
@@ -185,7 +184,7 @@ func NewParser(r io.Reader) *Parser {
 		r:      r,
 		buf:    make([]byte, bufInitSz),
 		buflen: bufInitSz,
-		st:     parserStateTopLevel,
+		state:  parserStateTopLevel,
 		lnkID:  -1,
 	}
 	return p
@@ -212,7 +211,7 @@ func (p *Parser) Replay(lnkID int) (*Parser, error) {
 	return &Parser{
 		parent: p,
 		lnkID:  lnkID,
-		st:     parserStateTopLevel,
+		state:  parserStateTopLevel,
 		r:      nil,
 		buf:    p.buf,
 		pos:    rng.beg,
@@ -237,7 +236,7 @@ func (p *Parser) ReadAhead(n int) error {
 func (p *Parser) Reset(r io.Reader) {
 	p.stack = p.stack[0:0]
 	p.cur = tokenInvalid
-	p.st = parserStateTopLevel
+	p.state = parserStateTopLevel
 
 	// If this a replay Parser, our reset is a little less ... reset-y.
 	if p.lnkID > -1 {
@@ -255,33 +254,327 @@ func (p *Parser) Reset(r io.Reader) {
 	p.lnkTbl = p.lnkTbl[0:0]
 }
 
+type parserState uint8
+
+const (
+	parserStateTopLevel = iota
+	parserStateArray
+	parserStateArrayEnd
+	parserStateHashKey
+	parserStateHashValue
+	parserStateHashEnd
+	parserStateIVarInit
+	parserStateIVarLen
+	parserStateIVarKey
+	parserStateIVarValue
+	parserStateIVarEnd
+	parserStateUsrMarshalInit
+	parserStateUsrMarshalVal
+	parserStateUsrMarshalEnd
+	parserStateEOF
+)
+
 // Next advances the parser to the next token in the stream.
 func (p *Parser) Next() (tok Token, err error) {
-	// A couple of state transitions don't yield a token. We pump the transitions until we get one.
 	for tok == tokenInvalid {
-		if 1 == 0 {
-			fmt.Println(runtime.FuncForPC(reflect.ValueOf(p.st).Pointer()).Name())
-		}
 
-		tok, p.st, err = p.st(p)
-		if err != nil {
-			return
+		switch p.state {
+
+		// the initial state of a Parser expects to read 2-byte magic and then a top level value
+		case parserStateTopLevel:
+			if p.pos == 0 {
+				if p.end < 3 {
+					if err = p.fill(3 - p.end); err != nil {
+						return
+					}
+				}
+
+				if p.buf[p.pos] != 0x04 || p.buf[p.pos+1] != 0x08 {
+					err = errors.Errorf("Expected magic header 0x0408, got 0x%.4X", int16(p.buf[p.pos])<<8|int16(p.buf[p.pos+1]))
+					return
+				}
+				p.pos = 2
+			}
+
+			tok, err = p.readNext()
+			if err != nil {
+				return
+			}
+
+			p.state = parserStateEOF
+
+		// state when reading elements of an array
+		case parserStateArray:
+			// sanity check the top of stack is an array.
+			cur := p.stack.cur()
+			if cur.typ != ctxArray {
+				err = errors.Errorf("expected top of stack to be array, got %d", cur.typ)
+				return
+			}
+
+			tok, err = p.readNext()
+			if err != nil {
+				return
+			}
+
+			cur.pos++
+			if cur.pos == cur.sz {
+				p.state = parserStateArrayEnd
+			} else {
+				p.state = parserStateArray
+			}
+
+		// state when we've finished parsing an array
+		case parserStateArrayEnd:
+			cur := p.stack.cur()
+			if cur.typ != ctxArray {
+				err = errors.Errorf("expected top of stack to be array, got %d", cur.typ)
+				return
+			}
+
+			tok = TokenEndArray
+			if cur.r != nil {
+				cur.r.end = p.pos
+			}
+			p.state = p.stack.pop()
+
+		// state when reading a key in a hash
+		case parserStateHashKey:
+			// sanity check the top of stack is an hash.
+			cur := p.stack.cur()
+			if cur.typ != ctxHash {
+				err = errors.Errorf("expected top of stack to be hash, got %d", cur.typ)
+				return
+			}
+
+			tok, err = p.readNext()
+			if err != nil {
+				return
+			}
+			p.state = parserStateHashValue
+
+		// state when reading a value in a hash
+		case parserStateHashValue:
+			// sanity check the top of stack is an hash.
+			cur := p.stack.cur()
+			if cur.typ != ctxHash {
+				err = errors.Errorf("expected top of stack to be hash, got %d", cur.typ)
+				return
+			}
+
+			tok, err = p.readNext()
+			if err != nil {
+				return
+			}
+
+			cur.pos++
+			if cur.pos == cur.sz {
+				p.state = parserStateHashEnd
+			} else {
+				p.state = parserStateHashKey
+			}
+
+		// state when we've completed reading a hash
+		case parserStateHashEnd:
+			cur := p.stack.cur()
+			if cur.typ != ctxHash {
+				err = errors.Errorf("expected top of stack to be hash, got %d", cur.typ)
+				return
+			}
+
+			// Hash is done, return an end hash token and pop stack.
+			tok = TokenEndHash
+			if cur.r != nil {
+				cur.r.end = p.pos
+			}
+			p.state = p.stack.pop()
+
+		// initial state of an ivar context - expects to read a value, then transitions to
+		// parserStateIVarLength
+		case parserStateIVarInit:
+			cur := p.stack.cur()
+			if cur.typ != ctxIVar {
+				err = errors.Errorf("expected top of stack to be ivar, got %d", cur.typ)
+				return
+			}
+
+			tok, err = p.readNext()
+			if err != nil {
+				return
+			}
+
+			p.state = parserStateIVarLen
+
+			// If the next state is a nested object (array, hash, etc) we nuke the saved range it has and put it on the ivar
+			// instead. This is so that an IVar'd hash/array/whatever will have a replay range that includes this IVar.
+			p.stack.cur().r = nil
+
+			// The lnk table item that just got saved needs to have its end scrubbed and it's beginning moved backwards by 1
+			// to ensure the replay includes this whole IVar.
+			r := &p.lnkTbl[len(p.lnkTbl)-1]
+			r.beg--
+			r.end = 0
+			cur.r = r
+
+		case parserStateIVarLen:
+			cur := p.stack.cur()
+			if cur.typ != ctxIVar {
+				err = errors.Errorf("expected top of stack to be ivar, got %d", cur.typ)
+				return
+			}
+
+			cur.sz, err = p.long()
+			if err != nil {
+				return
+			}
+
+			tok = TokenIVarProps
+
+			if cur.sz == 0 {
+				p.state = parserStateIVarEnd
+			}
+			p.state = parserStateIVarKey
+
+		case parserStateIVarKey:
+			cur := p.stack.cur()
+			if cur.typ != ctxIVar {
+				err = errors.Errorf("expected top of stack to be ivar, got %d", cur.typ)
+				return
+			}
+
+			tok, err = p.readNext()
+			if err != nil {
+				return
+			} else if tok != TokenSymbol {
+				// IVar keys are only permitted to be symbols
+				err = errors.Errorf("unexpected token %s - expected Symbol for IVar key", tok)
+				return
+			}
+
+			p.state = parserStateIVarValue
+
+		case parserStateIVarValue:
+			cur := p.stack.cur()
+			if cur.typ != ctxIVar {
+				err = errors.Errorf("expected top of stack to be ivar, got %d", cur.typ)
+				return
+			}
+
+			tok, err = p.readNext()
+			if err != nil {
+				return
+			}
+			cur.pos++
+
+			if cur.pos == cur.sz {
+				p.state = parserStateIVarEnd
+			} else {
+				p.state = parserStateIVarKey
+			}
+
+		case parserStateIVarEnd:
+			cur := p.stack.cur()
+			if cur.typ != ctxIVar {
+				err = errors.Errorf("expected top of stack to be ivar, got %d", cur.typ)
+				return
+			}
+
+			if cur.r != nil {
+				cur.r.end = p.pos
+			}
+			tok = TokenEndIVar
+			p.state = p.stack.pop()
+
+		case parserStateUsrMarshalInit:
+			cur := p.stack.cur()
+			if cur.typ != ctxUsrMarshal {
+				err = errors.Errorf("expected top of stack to be usrMarshal, got %d", cur.typ)
+				return
+			}
+
+			tok, err = p.readNext()
+			if err != nil {
+				return
+			} else if tok != TokenSymbol {
+				err = errors.Errorf("expected next token for usrmarshal object to be Symbol, got %s", tok)
+				return
+			}
+
+			p.state = parserStateUsrMarshalVal
+
+		case parserStateUsrMarshalVal:
+			cur := p.stack.cur()
+			if cur.typ != ctxUsrMarshal {
+				err = errors.Errorf("expected top of stack to be usrMarshal, got %d", cur.typ)
+				return
+			}
+
+			tok, err = p.readNext()
+			if err != nil {
+				return
+			}
+
+			p.state = parserStateUsrMarshalEnd
+
+		case parserStateUsrMarshalEnd:
+			cur := p.stack.cur()
+			if cur.typ != ctxUsrMarshal {
+				err = errors.Errorf("expected top of stack to be usrMarshal, got %d", cur.typ)
+				return
+			}
+
+			p.state = p.stack.pop()
+
+		// our EOF state - once we're here we continue to transition to the same state
+		// and return the same token until the Parser is reset to initial state.
+		case parserStateEOF:
+			tok = TokenEOF
 		}
 	}
 
 	p.cur = tok
+
+	// Our state is woven through potentially many nested levels of context.
+	// If we start a new context for an array/hash/ivar/whatever, we point its terminal
+	// state at our next one. For example if the top level value was a single depth array,
+	// once the array had finished parsing it would know to transition to parserStateEOF.
+	// this method handles pushing new stack items when needed
+	switch tok {
+	case TokenStartArray:
+		ctx := p.stack.push(ctxArray, p.num, p.state)
+		// Make sure to attach the range we added to the lnktbl in readNext()
+		ctx.r = &p.lnkTbl[len(p.lnkTbl)-1]
+		if p.num == 0 {
+			p.state = parserStateArrayEnd
+		} else {
+			p.state = parserStateArray
+		}
+	case TokenStartHash:
+		ctx := p.stack.push(ctxHash, p.num, p.state)
+		// Make sure to attach the range we added to the lnktbl in readNext()
+		ctx.r = &p.lnkTbl[len(p.lnkTbl)-1]
+		if p.num == 0 {
+			p.state = parserStateHashEnd
+		} else {
+			p.state = parserStateHashKey
+		}
+	case TokenStartIVar:
+		p.stack.push(ctxIVar, 0, p.state)
+		p.state = parserStateIVarInit
+	case TokenUsrMarshal:
+		p.stack.push(ctxUsrMarshal, 0, p.state)
+		p.state = parserStateUsrMarshalInit
+	}
+
 	return
 }
 
 // ExpectNext is a convenience method that calls Next() and ensures the next token is the one provided.
 func (p *Parser) ExpectNext(exp Token) (err error) {
-	// A couple of state transitions don't yield a token. We pump the transitions until we get one.
 	var tok Token
-	for tok == tokenInvalid {
-		tok, p.st, err = p.st(p)
-		if err != nil {
-			return
-		}
+	tok, err = p.Next()
+	if err != nil {
+		return
 	}
 
 	if tok != exp {
@@ -290,7 +583,7 @@ func (p *Parser) ExpectNext(exp Token) (err error) {
 	}
 
 	p.cur = tok
-	return nil
+	return
 }
 
 // Skip examines the current token, and will continuously read tokens until the current
@@ -770,325 +1063,5 @@ func (p *Parser) fill(num int) (err error) {
 	} else if err != nil {
 		err = errors.Wrap(err, "fill")
 	}
-	return
-}
-
-type parserState func(*Parser) (Token, parserState, error)
-
-// Our state is woven through potentially many nested levels of context.
-// If we start a new context for an array/hash/ivar/whatever, we point its terminal
-// state at our next one. For example if the top level value was a single depth array,
-// once the array had finished parsing it would know to transition to parserStateEOF.
-// this method handles pushing new stack items when needed
-func nextState(p *Parser, tok Token, next parserState) parserState {
-	switch tok {
-	case TokenStartArray:
-		ctx := p.stack.push(ctxArray, p.num, next)
-		// Make sure to attach the range we added to the lnktbl in readNext()
-		ctx.r = &p.lnkTbl[len(p.lnkTbl)-1]
-		if p.num == 0 {
-			return parserStateArrayEnd
-		} else {
-			return parserStateArray
-		}
-	case TokenStartHash:
-		ctx := p.stack.push(ctxHash, p.num, next)
-		// Make sure to attach the range we added to the lnktbl in readNext()
-		ctx.r = &p.lnkTbl[len(p.lnkTbl)-1]
-		if p.num == 0 {
-			return parserStateHashEnd
-		} else {
-			return parserStateHashKey
-		}
-	case TokenStartIVar:
-		p.stack.push(ctxIVar, 0, next)
-		return parserStateIVarInit
-	case TokenUsrMarshal:
-		p.stack.push(ctxUsrMarshal, 0, next)
-		return parserStateUsrMarshalInit
-	}
-	return next
-}
-
-// the initial state of a Parser expects to read 2-byte magic and then a top level value
-func parserStateTopLevel(p *Parser) (tok Token, next parserState, err error) {
-	if p.pos == 0 {
-		if p.end < 3 {
-			if err = p.fill(3 - p.end); err != nil {
-				return
-			}
-		}
-
-		if p.buf[p.pos] != 0x04 || p.buf[p.pos+1] != 0x08 {
-			err = errors.Errorf("Expected magic header 0x0408, got 0x%.4X", int16(p.buf[p.pos])<<8|int16(p.buf[p.pos+1]))
-			return
-		}
-		p.pos = 2
-	}
-
-	tok, err = p.readNext()
-	if err != nil {
-		return
-	}
-
-	// We never expect to actually read an io.EOF because we should always be transitioning
-	// to parserStateEOF when we've finished parsing the top level value.
-	next = nextState(p, tok, parserStateEOF)
-	return
-}
-
-// state when reading elements of an array
-func parserStateArray(p *Parser) (tok Token, next parserState, err error) {
-	// sanity check the top of stack is an array.
-	cur := p.stack.cur()
-	if cur.typ != ctxArray {
-		err = errors.Errorf("expected top of stack to be array, got %d", cur.typ)
-		return
-	}
-
-	tok, err = p.readNext()
-	if err != nil {
-		return
-	}
-
-	cur.pos++
-	if cur.pos == cur.sz {
-		next = nextState(p, tok, parserStateArrayEnd)
-	} else {
-		next = nextState(p, tok, parserStateArray)
-	}
-	return
-}
-
-func parserStateArrayEnd(p *Parser) (tok Token, next parserState, err error) {
-	cur := p.stack.cur()
-	if cur.typ != ctxArray {
-		err = errors.Errorf("expected top of stack to be array, got %d", cur.typ)
-		return
-	}
-
-	tok = TokenEndArray
-	if cur.r != nil {
-		cur.r.end = p.pos
-	}
-	next = p.stack.pop()
-	return
-}
-
-// state when reading a key in a hash
-func parserStateHashKey(p *Parser) (tok Token, next parserState, err error) {
-	// sanity check the top of stack is an hash.
-	cur := p.stack.cur()
-	if cur.typ != ctxHash {
-		err = errors.Errorf("expected top of stack to be hash, got %d", cur.typ)
-		return
-	}
-
-	tok, err = p.readNext()
-	if err != nil {
-		return
-	}
-	next = nextState(p, tok, parserStateHashValue)
-	return
-}
-
-// state when reading a value in a hash
-func parserStateHashValue(p *Parser) (tok Token, next parserState, err error) {
-	// sanity check the top of stack is an hash.
-	cur := p.stack.cur()
-	if cur.typ != ctxHash {
-		err = errors.Errorf("expected top of stack to be hash, got %d", cur.typ)
-		return
-	}
-
-	tok, err = p.readNext()
-	if err != nil {
-		return
-	}
-
-	cur.pos++
-	if cur.pos == cur.sz {
-		next = nextState(p, tok, parserStateHashEnd)
-	} else {
-		next = nextState(p, tok, parserStateHashKey)
-	}
-	return
-}
-
-func parserStateHashEnd(p *Parser) (tok Token, next parserState, err error) {
-	cur := p.stack.cur()
-	if cur.typ != ctxHash {
-		err = errors.Errorf("expected top of stack to be hash, got %d", cur.typ)
-		return
-	}
-
-	// Hash is done, return an end hash token and pop stack.
-	tok = TokenEndHash
-	if cur.r != nil {
-		cur.r.end = p.pos
-	}
-	next = p.stack.pop()
-	return
-}
-
-// initial state of an ivar context - expects to read a value, then transitions to
-// parserStateIVarLength
-func parserStateIVarInit(p *Parser) (tok Token, next parserState, err error) {
-	cur := p.stack.cur()
-	if cur.typ != ctxIVar {
-		err = errors.Errorf("expected top of stack to be ivar, got %d", cur.typ)
-		return
-	}
-
-	tok, err = p.readNext()
-	if err != nil {
-		return
-	}
-
-	next = nextState(p, tok, parserStateIVarLen)
-
-	// If the next state is a nested object (array, hash, etc) we nuke the saved range it has and put it on the ivar
-	// instead. This is so that an IVar'd hash/array/whatever will have a replay range that includes this IVar.
-	p.stack.cur().r = nil
-
-	// The lnk table item that just got saved needs to have its end scrubbed and it's beginning moved backwards by 1
-	// to ensure the replay includes this whole IVar.
-	r := &p.lnkTbl[len(p.lnkTbl)-1]
-	r.beg--
-	r.end = 0
-	cur.r = r
-
-	return
-}
-
-func parserStateIVarLen(p *Parser) (tok Token, next parserState, err error) {
-	cur := p.stack.cur()
-	if cur.typ != ctxIVar {
-		err = errors.Errorf("expected top of stack to be ivar, got %d", cur.typ)
-		return
-	}
-
-	cur.sz, err = p.long()
-	if err != nil {
-		return
-	}
-
-	tok = TokenIVarProps
-
-	if cur.sz == 0 {
-		next = parserStateIVarEnd
-	}
-	next = parserStateIVarKey
-	return
-}
-
-func parserStateIVarKey(p *Parser) (tok Token, next parserState, err error) {
-	cur := p.stack.cur()
-	if cur.typ != ctxIVar {
-		err = errors.Errorf("expected top of stack to be ivar, got %d", cur.typ)
-		return
-	}
-
-	tok, err = p.readNext()
-	if err != nil {
-		return
-	} else if tok != TokenSymbol {
-		// IVar keys are only permitted to be symbols
-		err = errors.Errorf("unexpected token %s - expected Symbol for IVar key", tok)
-		return
-	}
-
-	next = parserStateIVarValue
-	return
-}
-
-func parserStateIVarValue(p *Parser) (tok Token, next parserState, err error) {
-	cur := p.stack.cur()
-	if cur.typ != ctxIVar {
-		err = errors.Errorf("expected top of stack to be ivar, got %d", cur.typ)
-		return
-	}
-
-	tok, err = p.readNext()
-	if err != nil {
-		return
-	}
-	cur.pos++
-
-	if cur.pos == cur.sz {
-		next = nextState(p, tok, parserStateIVarEnd)
-	} else {
-		next = nextState(p, tok, parserStateIVarKey)
-	}
-
-	return
-}
-
-func parserStateIVarEnd(p *Parser) (tok Token, next parserState, err error) {
-	cur := p.stack.cur()
-	if cur.typ != ctxIVar {
-		err = errors.Errorf("expected top of stack to be ivar, got %d", cur.typ)
-		return
-	}
-
-	if cur.r != nil {
-		cur.r.end = p.pos
-	}
-	tok = TokenEndIVar
-	next = p.stack.pop()
-	return
-}
-
-func parserStateUsrMarshalInit(p *Parser) (tok Token, next parserState, err error) {
-	cur := p.stack.cur()
-	if cur.typ != ctxUsrMarshal {
-		err = errors.Errorf("expected top of stack to be usrMarshal, got %d", cur.typ)
-		return
-	}
-
-	tok, err = p.readNext()
-	if err != nil {
-		return
-	} else if tok != TokenSymbol {
-		err = errors.Errorf("expected next token for usrmarshal object to be Symbol, got %s", tok)
-		return
-	}
-
-	next = parserStateUsrMarshalVal
-	return
-}
-
-func parserStateUsrMarshalVal(p *Parser) (tok Token, next parserState, err error) {
-	cur := p.stack.cur()
-	if cur.typ != ctxUsrMarshal {
-		err = errors.Errorf("expected top of stack to be usrMarshal, got %d", cur.typ)
-		return
-	}
-
-	tok, err = p.readNext()
-	if err != nil {
-		return
-	}
-
-	next = nextState(p, tok, parserStateUsrMarshalEnd)
-	return
-}
-
-func parserStateUsrMarshalEnd(p *Parser) (tok Token, next parserState, err error) {
-	cur := p.stack.cur()
-	if cur.typ != ctxUsrMarshal {
-		err = errors.Errorf("expected top of stack to be usrMarshal, got %d", cur.typ)
-		return
-	}
-
-	next = p.stack.pop()
-	return
-}
-
-// our EOF state - once we're here we continue to transition to the same state
-// and return the same token until the Parser is reset to initial state.
-func parserStateEOF(*Parser) (tok Token, next parserState, err error) {
-	tok = TokenEOF
-	next = parserStateEOF
 	return
 }
