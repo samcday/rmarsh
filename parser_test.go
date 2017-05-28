@@ -256,8 +256,8 @@ func BenchmarkParserSymbolSingleByte(b *testing.B) {
 		if err := p.ExpectNext(rmarsh.TokenSymbol); err != nil {
 			b.Fatal(err)
 		}
-		if !bytes.Equal(p.Bytes(), exp) {
-			b.Fatalf("%s != test", p.Bytes())
+		if !bytes.Equal(p.UnsafeBytes(), exp) {
+			b.Fatalf("%s != test", p.UnsafeBytes())
 		}
 	}
 }
@@ -273,8 +273,8 @@ func BenchmarkParserSymbolMultiByte(b *testing.B) {
 		if err := p.ExpectNext(rmarsh.TokenSymbol); err != nil {
 			b.Fatal(err)
 		}
-		if !bytes.Equal(p.Bytes(), exp) {
-			b.Fatalf("%s != test", p.Bytes())
+		if !bytes.Equal(p.UnsafeBytes(), exp) {
+			b.Fatalf("%s != test", p.UnsafeBytes())
 		}
 	}
 }
@@ -302,8 +302,8 @@ func BenchmarkParserString(b *testing.B) {
 		if err := p.ExpectNext(rmarsh.TokenString); err != nil {
 			b.Fatal(err)
 		}
-		if !bytes.Equal(p.Bytes(), exp) {
-			b.Fatalf("%s != test", p.Bytes())
+		if !bytes.Equal(p.UnsafeBytes(), exp) {
+			b.Fatalf("%s != test", p.UnsafeBytes())
 		}
 	}
 }
@@ -380,8 +380,8 @@ func BenchmarkParserSymlink(b *testing.B) {
 		if err := p.ExpectNext(rmarsh.TokenSymbol); err != nil {
 			b.Fatal(err)
 		}
-		if !bytes.Equal(p.Bytes(), exp) {
-			b.Fatalf("%s != test", p.Bytes())
+		if !bytes.Equal(p.UnsafeBytes(), exp) {
+			b.Fatalf("%s != test", p.UnsafeBytes())
 		}
 		if err := p.ExpectNext(rmarsh.TokenEndArray); err != nil {
 			b.Fatal(err)

@@ -220,6 +220,16 @@ func (p *Parser) Replay(lnkID int) (*Parser, error) {
 	}, nil
 }
 
+// ReadAhead instructs the Parser to read n bytes into the read buffer for parsing. If the size of the Marshal stream
+// is known ahead of time, this method should be called as it will dramatically reduce the penalty of io and GC activity
+// during parsing.
+// Ordinarily, Parsers will never read past the end of the current Marshal stream during parsing. It is the
+// responsibility of the caller to ensure the specified number of bytes does not read past the end of the current
+// stream.
+func (p *Parser) ReadAhead(n int) error {
+	return p.fill(n)
+}
+
 // Reset reverts the Parser into the identity state, ready to read a new Marshal 4.8 stream from the existing Reader.
 // If the provided io.Reader is nil, the existing Reader will continue to be used.
 func (p *Parser) Reset(r io.Reader) {
@@ -410,10 +420,23 @@ func (p *Parser) Bignum() (big.Int, error) {
 	return bnum, nil
 }
 
-// Bytes returns the raw bytes for the current token.
-// NOTE: The return byte slice is the one that is used internally, it will be modified on the next call to Next().
-// If any data needs to be kept, be sure to copy it out of the returned buffer.
-func (p *Parser) Bytes() []byte {
+// Bytes copies the raw bytes for the current value into the provided buffer.
+// It returns an error if the provided buffer is not large enough to fit the data.
+// Returns the number of bytes written into the buffer on success.
+func (p *Parser) Bytes(b []byte) (wr int, err error) {
+	if len(b) < p.ctx.end-p.ctx.beg {
+		err = fmt.Errorf("Buffer is too small")
+		return
+	}
+	wr = copy(b, p.buf[p.ctx.beg:p.ctx.end])
+	return
+}
+
+// UnsafeBytes returns the raw bytes for the current value.
+// NOTE: this method is unsafe because the returned byte slice is a reference to an internal read buffer used by this
+// Parser. The data in the slice will be invalid on the next call to Reset(). If the data needs to be kept for longer
+// than that it should be copied out into a buffer owned by the caller.
+func (p *Parser) UnsafeBytes() []byte {
 	return p.buf[p.ctx.beg:p.ctx.end]
 }
 
@@ -425,6 +448,21 @@ func (p *Parser) Text() (string, error) {
 		return string(p.bnumsign) + string(p.buf[p.ctx.beg:p.ctx.end]), nil
 	case TokenFloat, TokenSymbol, TokenString:
 		return string(p.buf[p.ctx.beg:p.ctx.end]), nil
+	}
+	return "", errors.Errorf("rmarsh.Parser.Text() called for wrong token: %s", p.cur)
+}
+
+// UnsafeText returns the value contained in the current token interpreted as a string.
+// The returned string is a view over data contained in the internal read buffer used by this Parser. It will become
+// invalid on the next call to Reset().
+func (p *Parser) UnsafeText() (string, error) {
+	switch p.cur {
+	case TokenFloat, TokenSymbol, TokenString:
+		buf := p.buf[p.ctx.beg:p.ctx.end]
+		bytesHeader := (*reflect.SliceHeader)(unsafe.Pointer(&buf))
+		strHeader := reflect.StringHeader{Data: bytesHeader.Data, Len: bytesHeader.Len}
+		return *(*string)(unsafe.Pointer(&strHeader)), nil
+		// return string(), nil
 	}
 	return "", errors.Errorf("rmarsh.Parser.Text() called for wrong token: %s", p.cur)
 }
@@ -764,9 +802,12 @@ func nextState(p *Parser, tok Token, next parserState) parserState {
 // the initial state of a Parser expects to read 2-byte magic and then a top level value
 func parserStateTopLevel(p *Parser) (tok Token, next parserState, err error) {
 	if p.pos == 0 {
-		if err = p.fill(3); err != nil {
-			return
+		if p.end < 3 {
+			if err = p.fill(3 - p.end); err != nil {
+				return
+			}
 		}
+
 		if p.buf[p.pos] != 0x04 || p.buf[p.pos+1] != 0x08 {
 			err = errors.Errorf("Expected magic header 0x0408, got 0x%.4X", int16(p.buf[p.pos])<<8|int16(p.buf[p.pos+1]))
 			return
