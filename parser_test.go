@@ -507,16 +507,16 @@ func TestParserIVarString(t *testing.T) {
 func TestParserLink(t *testing.T) {
 	p := parseFromRuby(t, `a = 1.2; [a, a]`)
 	expectToken(t, p, rmarsh.TokenStartArray)
-	if id := p.LinkId(); id != 0 {
-		t.Errorf("p.LinkId() = %d != 0", id)
+	if id := p.LinkID(); id != 0 {
+		t.Errorf("p.LinkID() = %d != 0", id)
 	}
 	expectToken(t, p, rmarsh.TokenFloat)
-	if id := p.LinkId(); id != 1 {
-		t.Errorf("p.LinkId() = %d != 1", id)
+	if id := p.LinkID(); id != 1 {
+		t.Errorf("p.LinkID() = %d != 1", id)
 	}
 	expectToken(t, p, rmarsh.TokenLink)
-	if id := p.LinkId(); id != 1 {
-		t.Errorf("p.LinkId() = %d != 1", id)
+	if id := p.LinkID(); id != 1 {
+		t.Errorf("p.LinkID() = %d != 1", id)
 	}
 	expectToken(t, p, rmarsh.TokenEndArray)
 }

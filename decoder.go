@@ -27,6 +27,7 @@ func ReadValue(r io.Reader, val interface{}) error {
 	return NewDecoder(NewParser(r)).Decode(val)
 }
 
+// Decode will consume a value from the underlying parser and marshal it into the provided Golang type.
 func (d *Decoder) Decode(val interface{}) error {
 	v := reflect.ValueOf(val)
 	if v.Kind() != reflect.Ptr {
@@ -209,8 +210,8 @@ func stringDecoder(d *Decoder, v reflect.Value) error {
 		}
 		v.SetString(str)
 
-		lnkId := d.p.LinkId()
-		if lnkId > -1 {
+		lnkID := d.p.LinkID()
+		if lnkID > -1 {
 			d.objCache = append(d.objCache, v.Addr())
 		}
 
@@ -229,8 +230,8 @@ func stringDecoder(d *Decoder, v reflect.Value) error {
 		}
 		v.SetString(str)
 
-		lnkId := d.p.LinkId()
-		if lnkId > -1 {
+		lnkID := d.p.LinkID()
+		if lnkID > -1 {
 			d.objCache = append(d.objCache, v.Addr())
 		}
 
@@ -266,8 +267,8 @@ func (sliceDec *sliceDecoder) decode(d *Decoder, v reflect.Value) error {
 		v.Set(reflect.MakeSlice(v.Type(), l, l))
 	}
 
-	lnkId := d.p.LinkId()
-	if lnkId > -1 {
+	lnkID := d.p.LinkID()
+	if lnkID > -1 {
 		d.objCache = append(d.objCache, v.Addr())
 	}
 
@@ -409,7 +410,7 @@ func (ptrDec *ptrDecoder) decode(d *Decoder, v reflect.Value) error {
 	// we can just immediately assign it and continue.
 	// Otherwise we start a replay parser and run it on the target.
 	if tok == TokenLink {
-		lnkID := d.p.LinkId()
+		lnkID := d.p.LinkID()
 		if len(d.objCache) > lnkID {
 			cached := d.objCache[lnkID]
 			if cached.Type().AssignableTo(v.Type()) {
@@ -419,7 +420,7 @@ func (ptrDec *ptrDecoder) decode(d *Decoder, v reflect.Value) error {
 		}
 
 		// TODO: setup a replay parser and run it against the target.
-		return fmt.Errorf("Unhandled link encountered. %d %d")
+		return fmt.Errorf("Unhandled link encountered. %d", lnkID)
 	}
 
 	// Push the token back and decode against resolved ptr.

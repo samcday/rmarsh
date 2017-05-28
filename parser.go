@@ -633,10 +633,10 @@ func (p *Parser) Len() int {
 	return p.stack.cur().sz
 }
 
-// LinkId returns the id number for the current link value, or the expected link id for a linkable value.
+// LinkID returns the id number for the current link value, or the expected link id for a linkable value.
 // Only valid for the first token of linkable values such as TokenFloat, TokenString, TokenStartHash, TokenStartArray,
 // etc. Returns -1 for anything else.
-func (p *Parser) LinkId() int {
+func (p *Parser) LinkID() int {
 	switch p.cur {
 	case TokenLink:
 		return p.num
