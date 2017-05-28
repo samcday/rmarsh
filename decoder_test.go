@@ -48,7 +48,7 @@ func TestDecoderBool(t *testing.T) {
 	}
 }
 
-func BenchmarkMapperReadTrue(b *testing.B) {
+func BenchmarkDecoderReadTrue(b *testing.B) {
 	r := newCyclicReader(rbEncode(b, "true"))
 	p := rmarsh.NewParser(r)
 	dec := rmarsh.NewDecoder(p)
@@ -81,7 +81,7 @@ func TestDecoderInt(t *testing.T) {
 	}
 }
 
-func BenchmarkMapperReadUint(b *testing.B) {
+func BenchmarkDecoderReadUint(b *testing.B) {
 	r := newCyclicReader(rbEncode(b, "0xDEAD"))
 	p := rmarsh.NewParser(r)
 	dec := rmarsh.NewDecoder(p)
