@@ -208,10 +208,7 @@ func stringDecoder(d *Decoder, v reflect.Value) (err error) {
 		lnkID := d.p.LinkID()
 		cached, ok := d.objCache[lnkID]
 		if ok {
-			// Indirect the cached value until we arrive at a non-ptr type.
-			for cached.IsValid() && cached.Kind() == reflect.Ptr && !cached.IsNil() {
-				cached = cached.Elem()
-			}
+			cached = cached.Elem()
 			if cached.Kind() == reflect.String {
 				v.SetString(cached.String())
 				return
@@ -433,13 +430,9 @@ func (ptrDec *ptrDecoder) decode(d *Decoder, v reflect.Value) error {
 		lnkID := d.p.LinkID()
 		cached, ok := d.objCache[lnkID]
 
-		// Keep indirecting the cached value until we arrive at a non-pointer type
-		for cached.IsValid() && cached.Kind() == reflect.Ptr && !cached.IsNil() {
-			if ok && cached.Type().AssignableTo(v.Type()) {
-				v.Set(cached)
-				return nil
-			}
-			cached = cached.Elem()
+		if ok && cached.Type().AssignableTo(v.Type()) {
+			v.Set(cached)
+			return nil
 		}
 
 		// TODO: setup a replay parser and run it against the target.
