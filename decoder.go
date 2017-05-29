@@ -93,6 +93,13 @@ func newTypeDecoder(t reflect.Type) decoderFunc {
 	case reflect.Struct:
 		return newStructDecoder(t)
 	case reflect.Ptr:
+		// Since Ruby doesn't offer pointer types
+		// We can simplify our type handling by normalising all Go pointers down to
+		// single depth. e.g if we've been passed a ***string, we'll normalise it
+		// down to *string before doing anything with it.
+		if t.Elem().Kind() == reflect.Ptr {
+			return newPtrIndirector(t)
+		}
 		return newPtrDecoder(t)
 	}
 	return unsupportedTypeDecoder
@@ -425,6 +432,7 @@ func (ptrDec *ptrDecoder) decode(d *Decoder, v reflect.Value) error {
 	if tok == TokenLink {
 		lnkID := d.p.LinkID()
 		cached, ok := d.objCache[lnkID]
+
 		// Keep indirecting the cached value until we arrive at a non-pointer type
 		for cached.IsValid() && cached.Kind() == reflect.Ptr && !cached.IsNil() {
 			if ok && cached.Type().AssignableTo(v.Type()) {
@@ -457,6 +465,32 @@ func (ptrDec *ptrDecoder) decode(d *Decoder, v reflect.Value) error {
 
 func newPtrDecoder(t reflect.Type) decoderFunc {
 	dec := &ptrDecoder{newTypeDecoder(t.Elem())}
+	return dec.decode
+}
+
+type ptrIndirector struct {
+	types   []reflect.Type
+	elemDec decoderFunc
+}
+
+func (ptrIndir *ptrIndirector) decode(d *Decoder, v reflect.Value) error {
+	for _, typ := range ptrIndir.types {
+		if v.IsNil() {
+			v.Set(reflect.New(typ))
+		}
+		v = v.Elem()
+	}
+	return ptrIndir.elemDec(d, v)
+}
+
+func newPtrIndirector(t reflect.Type) decoderFunc {
+	var types []reflect.Type
+	for t.Elem().Kind() == reflect.Ptr {
+		types = append(types, t.Elem())
+		t = t.Elem()
+	}
+
+	dec := &ptrIndirector{types: types, elemDec: newPtrDecoder(t)}
 	return dec.decode
 }
 

@@ -262,3 +262,29 @@ func TestDecoderStringLinkMixed(t *testing.T) {
 		t.Fatalf(`%s != "test"`, s3)
 	}
 }
+
+// Tests that a cached string can then satisfy a string pointer
+func TestDecoderStringLinkMixedReverse(t *testing.T) {
+	r := bytes.NewBuffer(rbEncode(t, `s = "test"; [s, s]`))
+	p := rmarsh.NewParser(r)
+	dec := rmarsh.NewDecoder(p)
+
+	expectToken(t, p, rmarsh.TokenStartArray)
+
+	var s string
+	if err := dec.Decode(&s); err != nil {
+		t.Fatal(err)
+	}
+	if s != "test" {
+		t.Fatalf(`%s != "test"`, s)
+	}
+
+	var s2 ***string
+	if err := dec.Decode(&s2); err != nil {
+		t.Fatal(err)
+	}
+	if ***s2 != "test" {
+		t.Fatalf(`%s != "test"`, ***s2)
+	}
+
+}
