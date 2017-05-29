@@ -158,10 +158,9 @@ func TestDecoderArrayLink(t *testing.T) {
 func TestDecoderStringLinkSafety(t *testing.T) {
 	r := bytes.NewBuffer(rbEncode(t, `s = "test"; s2 = "foo"; [s, s, s2, s]`))
 	p := rmarsh.NewParser(r)
+	dec := rmarsh.NewDecoder(p)
 
 	expectToken(t, p, rmarsh.TokenStartArray)
-
-	dec := rmarsh.NewDecoder(p)
 
 	var s string
 	if err := dec.Decode(&s); err != nil {
@@ -196,10 +195,9 @@ func TestDecoderStringLinkSafety(t *testing.T) {
 func TestDecoderPtrLinkSafety(t *testing.T) {
 	r := bytes.NewBuffer(rbEncode(t, `s = "test"; s2 = "foo"; [s, s, s2, s]`))
 	p := rmarsh.NewParser(r)
+	dec := rmarsh.NewDecoder(p)
 
 	expectToken(t, p, rmarsh.TokenStartArray)
-
-	dec := rmarsh.NewDecoder(p)
 
 	var s *string
 	if err := dec.Decode(&s); err != nil {
@@ -228,5 +226,39 @@ func TestDecoderPtrLinkSafety(t *testing.T) {
 	}
 	if *s != "test" {
 		t.Fatalf(`%s != "test"`, *s)
+	}
+}
+
+// Tests that a cached value as a pointer to a string pointer can still satisfy
+// a concrete str.
+func TestDecoderStringLinkMixed(t *testing.T) {
+	r := bytes.NewBuffer(rbEncode(t, `s = "test"; [s, s, s]`))
+	p := rmarsh.NewParser(r)
+	dec := rmarsh.NewDecoder(p)
+
+	expectToken(t, p, rmarsh.TokenStartArray)
+
+	var s **string
+	if err := dec.Decode(&s); err != nil {
+		t.Fatal(err)
+	}
+	if **s != "test" {
+		t.Fatalf(`%s != "test"`, *s)
+	}
+
+	var s2 string
+	if err := dec.Decode(&s2); err != nil {
+		t.Fatal(err)
+	}
+	if s2 != "test" {
+		t.Fatalf(`%s != "test"`, s2)
+	}
+
+	var s3 *string
+	if err := dec.Decode(&s3); err != nil {
+		t.Fatal(err)
+	}
+	if *s3 != "test" {
+		t.Fatalf(`%s != "test"`, s3)
 	}
 }
