@@ -201,12 +201,14 @@ func stringDecoder(d *Decoder, v reflect.Value) error {
 		cached, ok := d.objCache[lnkID]
 		if ok {
 			if cached.Elem().Kind() == reflect.String {
-				v.Set(cached.Elem())
+				v.SetString(cached.Elem().String())
 				return nil
 			}
 		}
 		return fmt.Errorf("Unknown link id %d", lnkID)
 	case TokenStartIVar:
+		lnkID := d.p.LinkID()
+
 		// We're okay with an IVar as long as the next token is a String.
 		if err := d.p.ExpectNext(TokenString); err != nil {
 			return err
@@ -218,9 +220,9 @@ func stringDecoder(d *Decoder, v reflect.Value) error {
 		}
 		v.SetString(str)
 
-		lnkID := d.p.LinkID()
 		if lnkID > -1 {
-			d.objCache[lnkID] = v.Addr()
+			d.objCache[lnkID] = reflect.New(v.Type())
+			d.objCache[lnkID].Elem().SetString(str)
 		}
 
 		if err := d.p.ExpectNext(TokenIVarProps); err != nil {
@@ -240,7 +242,8 @@ func stringDecoder(d *Decoder, v reflect.Value) error {
 
 		lnkID := d.p.LinkID()
 		if lnkID > -1 {
-			d.objCache[lnkID] = v.Addr()
+			d.objCache[lnkID] = reflect.New(v.Type())
+			d.objCache[lnkID].Elem().SetString(str)
 		}
 
 		return nil
@@ -419,12 +422,10 @@ func (ptrDec *ptrDecoder) decode(d *Decoder, v reflect.Value) error {
 	// Otherwise we start a replay parser and run it on the target.
 	if tok == TokenLink {
 		lnkID := d.p.LinkID()
-		if len(d.objCache) > lnkID {
-			cached := d.objCache[lnkID]
-			if cached.Type().AssignableTo(v.Type()) {
-				v.Set(cached)
-				return nil
-			}
+		cached, ok := d.objCache[lnkID]
+		if ok && cached.Type().AssignableTo(v.Type()) {
+			v.Set(cached)
+			return nil
 		}
 
 		// TODO: setup a replay parser and run it against the target.
@@ -434,9 +435,9 @@ func (ptrDec *ptrDecoder) decode(d *Decoder, v reflect.Value) error {
 	// Push the token back and decode against resolved ptr.
 	d.curToken = tok
 
-	if v.IsNil() {
-		v.Set(reflect.New(v.Type().Elem()))
-	}
+	// Initialze the pointer to a new empty value.
+	v.Set(reflect.New(v.Type().Elem()))
+
 	return ptrDec.elemDec(d, v.Elem())
 }
 
