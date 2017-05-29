@@ -46,6 +46,23 @@ func (d *Decoder) nextToken() (Token, error) {
 	return d.p.Next()
 }
 
+func (d *Decoder) replay(lnkID int, v reflect.Value) (err error) {
+	oldP := d.p
+	d.p, err = d.p.Replay(lnkID)
+	if err != nil {
+		return
+	}
+
+	err = d.valueDecoder(v)(d, v)
+	// err = d.Decode(v.Addr())
+	if err != nil {
+		return
+	}
+	d.p = oldP
+
+	return
+}
+
 type decoderFunc func(*Decoder, reflect.Value) error
 
 func (d *Decoder) valueDecoder(v reflect.Value) decoderFunc {
@@ -215,8 +232,7 @@ func stringDecoder(d *Decoder, v reflect.Value) (err error) {
 			}
 		}
 
-		err = fmt.Errorf("Unknown link id %d", lnkID)
-		return
+		return d.replay(lnkID, v)
 	}
 
 	isIVar := tok == TokenStartIVar
@@ -435,8 +451,7 @@ func (ptrDec *ptrDecoder) decode(d *Decoder, v reflect.Value) error {
 			return nil
 		}
 
-		// TODO: setup a replay parser and run it against the target.
-		return fmt.Errorf("Unhandled link encountered. %d", lnkID)
+		return d.replay(lnkID, v)
 	}
 
 	v.Set(reflect.New(v.Type().Elem()))

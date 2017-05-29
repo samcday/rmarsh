@@ -412,8 +412,10 @@ func (p *Parser) Next() (tok Token, err error) {
 			// The lnk table item that just got saved needs to have its end scrubbed and it's beginning moved backwards by 1
 			// to ensure the replay includes this whole IVar.
 			r := &p.lnkTbl[len(p.lnkTbl)-1]
-			r.beg--
-			r.end = 0
+			if p.lnkID == -1 {
+				r.beg--
+				r.end = 0
+			}
 			cur.r = r
 
 		case parserStateIVarLen:

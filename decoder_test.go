@@ -288,3 +288,31 @@ func TestDecoderStringLinkMixedReverse(t *testing.T) {
 	}
 
 }
+
+func TestDecoderReplayString(t *testing.T) {
+	r := bytes.NewBuffer(rbEncode(t, `s = "test"; [s, s, s]`))
+	p := rmarsh.NewParser(r)
+	dec := rmarsh.NewDecoder(p)
+
+	expectToken(t, p, rmarsh.TokenStartArray)
+	expectToken(t, p, rmarsh.TokenStartIVar)
+	if err := p.Skip(); err != nil {
+		t.Fatal(err)
+	}
+
+	var s2 *string
+	if err := dec.Decode(&s2); err != nil {
+		t.Fatal(err)
+	}
+	if *s2 != "test" {
+		t.Fatalf(`%s != "test"`, *s2)
+	}
+
+	var s string
+	if err := dec.Decode(&s); err != nil {
+		t.Fatal(err)
+	}
+	if s != "test" {
+		t.Fatalf(`%s != "test"`, s)
+	}
+}
