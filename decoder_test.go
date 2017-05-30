@@ -316,3 +316,66 @@ func TestDecoderReplayString(t *testing.T) {
 		t.Fatalf(`%s != "test"`, s)
 	}
 }
+
+func TestDecoderIndexedStruct(t *testing.T) {
+	var st struct {
+		Test string `rmarsh:"_indexed,0"`
+		Foo  int8   `rmarsh:"_indexed,2"`
+	}
+
+	testDecoder(t, `["hello", "bacon", 123]`, &st)
+
+	if st.Test != "hello" {
+		t.Errorf("st.Test == %q != %q", st.Test, "hello")
+	}
+	if st.Foo != 123 {
+		t.Errorf("st.Foo == %d != 123", st.Foo)
+	}
+}
+
+func BenchmarkDecoderIndexedStruct(b *testing.B) {
+	r := newCyclicReader(rbEncode(b, `["hello", "world"]`))
+	p := rmarsh.NewParser(r)
+	dec := rmarsh.NewDecoder(p)
+
+	var st struct {
+		Hello string `rmarsh:"_indexed,0"`
+		World string `rmarsh:"_indexed,1"`
+	}
+
+	for i := 0; i < b.N; i++ {
+		st.Hello = ""
+		st.World = ""
+		p.Reset(nil)
+
+		if err := dec.Decode(&st); err != nil {
+			b.Fatal(err)
+		} else if st.Hello != "hello" {
+			b.Fatalf(`%v != "hello"`, st.Hello)
+		} else if st.World != "world" {
+			b.Fatalf(`%v != "world"`, st.World)
+		}
+	}
+}
+
+func TestDecoderIndexedStructNested(t *testing.T) {
+	var st struct {
+		Test struct {
+			Bar  string `rmarsh:"_indexed,0"`
+			Quux bool   `rmarsh:"_indexed,1"`
+		} `rmarsh:"_indexed,0"`
+		Foo int8 `rmarsh:"_indexed,2"`
+	}
+
+	testDecoder(t, `[["hello", true], "bacon", 123]`, &st)
+
+	if st.Test.Bar != "hello" {
+		t.Errorf("st.Test.Bar == %q != %q", st.Test.Bar, "hello")
+	}
+	if !st.Test.Quux {
+		t.Errorf("st.Test.Quux == %v != true", st.Test.Quux)
+	}
+	if st.Foo != 123 {
+		t.Errorf("st.Foo == %d != 123", st.Foo)
+	}
+}
