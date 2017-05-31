@@ -106,6 +106,9 @@ func newTypeDecoder(t reflect.Type) decoderFunc {
 	case reflect.String:
 		return stringDecoder
 	case reflect.Slice:
+		if t.Elem().Kind() == reflect.Uint8 {
+			return byteSliceDecoder
+		}
 		return newSliceDecoder(t)
 	case reflect.Struct:
 		return newStructDecoder(t)
@@ -274,6 +277,75 @@ func stringDecoder(d *Decoder, v reflect.Value) (err error) {
 	return
 }
 
+func byteSliceDecoder(d *Decoder, v reflect.Value) (err error) {
+	var tok Token
+
+	tok, err = d.nextToken()
+
+	isIVar := tok == TokenStartIVar
+	lnkID := d.p.LinkID()
+
+	if tok == TokenLink {
+		cached, ok := d.objCache[lnkID]
+		if ok {
+			if cached.Type() == v.Type() {
+				b := cached.Bytes()
+				if v.Cap() < len(b) {
+					v.Set(reflect.MakeSlice(v.Type(), len(b), len(b)))
+				}
+				v.SetLen(len(b))
+
+				dst := v.Bytes()
+				copy(dst, b)
+				return
+			}
+		}
+
+		return d.replay(lnkID, v)
+	}
+
+	if isIVar {
+		tok, err = d.p.Next()
+		if err != nil {
+			return
+		}
+	}
+
+	switch tok {
+	case TokenString, TokenSymbol:
+		b := d.p.UnsafeBytes()
+
+		if v.Cap() < len(b) {
+			v.Set(reflect.MakeSlice(v.Type(), len(b), len(b)))
+		}
+		v.SetLen(len(b))
+
+		dst := v.Bytes()
+		copy(dst, b)
+
+		if tok == TokenString {
+			if _, ok := d.objCache[lnkID]; !ok {
+				cacheV := reflect.MakeSlice(v.Type(), len(b), len(b))
+				copy(cacheV.Bytes(), b)
+				d.objCache[lnkID] = cacheV
+			}
+		}
+	default:
+		return fmt.Errorf("Unexpected token %v encountered while decoding []byte", tok)
+	}
+
+	if isIVar {
+		// TODO: properly parse IVar. For now, we just skip over encoding and such.
+		if err = d.p.ExpectNext(TokenIVarProps); err != nil {
+			return
+		}
+		err = d.p.Skip()
+	}
+
+	return nil
+
+}
+
 type sliceDecoder struct {
 	elemDec decoderFunc
 }
@@ -295,7 +367,6 @@ func (sliceDec *sliceDecoder) decode(d *Decoder, v reflect.Value) error {
 	cap := v.Cap()
 	if cap >= l {
 		v.SetLen(l)
-		v.SetCap(l)
 	} else {
 		v.Set(reflect.MakeSlice(v.Type(), l, l))
 	}
