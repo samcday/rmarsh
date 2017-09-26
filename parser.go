@@ -17,6 +17,16 @@ const (
 	stackInitSz  = 8   // Initial size of stack
 )
 
+// A ParserError is a description of an error encountered while parsing a Ruby Marshal stream.
+type ParserError struct {
+	msg    string
+	Offset int
+}
+
+func (e ParserError) Error() string {
+	return e.msg
+}
+
 // A Token represents a single distinct value type read from a Parser instance.
 type Token uint8
 
@@ -290,7 +300,7 @@ func (p *Parser) Next() (tok Token, err error) {
 				}
 
 				if p.buf[p.pos] != 0x04 || p.buf[p.pos+1] != 0x08 {
-					err = errors.Errorf("Expected magic header 0x0408, got 0x%.4X", int16(p.buf[p.pos])<<8|int16(p.buf[p.pos+1]))
+					err = p.parserError("Expected magic header 0x0408, got 0x%.4X", int16(p.buf[p.pos])<<8|int16(p.buf[p.pos+1]))
 					return
 				}
 				p.pos = 2
@@ -308,7 +318,7 @@ func (p *Parser) Next() (tok Token, err error) {
 			// sanity check the top of stack is an array.
 			cur := p.stack.cur()
 			if cur.typ != ctxArray {
-				err = errors.Errorf("expected top of stack to be array, got %d", cur.typ)
+				err = p.parserError("expected top of stack to be array, got %s", cur.typ)
 				return
 			}
 
@@ -328,7 +338,7 @@ func (p *Parser) Next() (tok Token, err error) {
 		case parserStateArrayEnd:
 			cur := p.stack.cur()
 			if cur.typ != ctxArray {
-				err = errors.Errorf("expected top of stack to be array, got %d", cur.typ)
+				err = p.parserError("expected top of stack to be array, got %s", cur.typ)
 				return
 			}
 
@@ -343,7 +353,7 @@ func (p *Parser) Next() (tok Token, err error) {
 			// sanity check the top of stack is an hash.
 			cur := p.stack.cur()
 			if cur.typ != ctxHash {
-				err = errors.Errorf("expected top of stack to be hash, got %d", cur.typ)
+				err = p.parserError("expected top of stack to be hash, got %s", cur.typ)
 				return
 			}
 
@@ -358,7 +368,7 @@ func (p *Parser) Next() (tok Token, err error) {
 			// sanity check the top of stack is an hash.
 			cur := p.stack.cur()
 			if cur.typ != ctxHash {
-				err = errors.Errorf("expected top of stack to be hash, got %d", cur.typ)
+				err = p.parserError("expected top of stack to be hash, got %s", cur.typ)
 				return
 			}
 
@@ -378,7 +388,7 @@ func (p *Parser) Next() (tok Token, err error) {
 		case parserStateHashEnd:
 			cur := p.stack.cur()
 			if cur.typ != ctxHash {
-				err = errors.Errorf("expected top of stack to be hash, got %d", cur.typ)
+				err = p.parserError("expected top of stack to be hash, got %s", cur.typ)
 				return
 			}
 
@@ -394,7 +404,7 @@ func (p *Parser) Next() (tok Token, err error) {
 		case parserStateIVarInit:
 			cur := p.stack.cur()
 			if cur.typ != ctxIVar {
-				err = errors.Errorf("expected top of stack to be ivar, got %d", cur.typ)
+				err = p.parserError("expected top of stack to be ivar, got %s", cur.typ)
 				return
 			}
 
@@ -421,7 +431,7 @@ func (p *Parser) Next() (tok Token, err error) {
 		case parserStateIVarLen:
 			cur := p.stack.cur()
 			if cur.typ != ctxIVar {
-				err = errors.Errorf("expected top of stack to be ivar, got %d", cur.typ)
+				err = p.parserError("expected top of stack to be ivar, got %s", cur.typ)
 				return
 			}
 
@@ -440,7 +450,7 @@ func (p *Parser) Next() (tok Token, err error) {
 		case parserStateIVarKey:
 			cur := p.stack.cur()
 			if cur.typ != ctxIVar {
-				err = errors.Errorf("expected top of stack to be ivar, got %d", cur.typ)
+				err = p.parserError("expected top of stack to be ivar, got %s", cur.typ)
 				return
 			}
 
@@ -449,7 +459,7 @@ func (p *Parser) Next() (tok Token, err error) {
 				return
 			} else if tok != TokenSymbol {
 				// IVar keys are only permitted to be symbols
-				err = errors.Errorf("unexpected token %s - expected Symbol for IVar key", tok)
+				err = p.parserError("expected next token to be Symbol, got %q", tok)
 				return
 			}
 
@@ -458,7 +468,7 @@ func (p *Parser) Next() (tok Token, err error) {
 		case parserStateIVarValue:
 			cur := p.stack.cur()
 			if cur.typ != ctxIVar {
-				err = errors.Errorf("expected top of stack to be ivar, got %d", cur.typ)
+				err = p.parserError("expected top of stack to be ivar, got %s", cur.typ)
 				return
 			}
 
@@ -477,7 +487,7 @@ func (p *Parser) Next() (tok Token, err error) {
 		case parserStateIVarEnd:
 			cur := p.stack.cur()
 			if cur.typ != ctxIVar {
-				err = errors.Errorf("expected top of stack to be ivar, got %d", cur.typ)
+				err = p.parserError("expected top of stack to be ivar, got %s", cur.typ)
 				return
 			}
 
@@ -490,7 +500,7 @@ func (p *Parser) Next() (tok Token, err error) {
 		case parserStateUsrMarshalInit:
 			cur := p.stack.cur()
 			if cur.typ != ctxUsrMarshal {
-				err = errors.Errorf("expected top of stack to be usrMarshal, got %d", cur.typ)
+				err = p.parserError("expected top of stack to be usrMarshal, got %s", cur.typ)
 				return
 			}
 
@@ -498,7 +508,7 @@ func (p *Parser) Next() (tok Token, err error) {
 			if err != nil {
 				return
 			} else if tok != TokenSymbol {
-				err = errors.Errorf("expected next token for usrmarshal object to be Symbol, got %s", tok)
+				err = p.parserError("expected next token for usrmarshal object to be Symbol, got %s", tok)
 				return
 			}
 
@@ -507,7 +517,7 @@ func (p *Parser) Next() (tok Token, err error) {
 		case parserStateUsrMarshalVal:
 			cur := p.stack.cur()
 			if cur.typ != ctxUsrMarshal {
-				err = errors.Errorf("expected top of stack to be usrMarshal, got %d", cur.typ)
+				err = p.parserError("expected top of stack to be usrMarshal, got %s", cur.typ)
 				return
 			}
 
@@ -521,7 +531,7 @@ func (p *Parser) Next() (tok Token, err error) {
 		case parserStateUsrMarshalEnd:
 			cur := p.stack.cur()
 			if cur.typ != ctxUsrMarshal {
-				err = errors.Errorf("expected top of stack to be usrMarshal, got %d", cur.typ)
+				err = p.parserError("expected top of stack to be usrMarshal, got %s", cur.typ)
 				return
 			}
 
@@ -580,7 +590,7 @@ func (p *Parser) ExpectNext(exp Token) (err error) {
 	}
 
 	if tok != exp {
-		err = errors.Errorf("rmarsh.Parser.ExpectNext(): read token %s, expected %s", tok, exp)
+		err = p.parserError("read token %q, expected %q", tok, exp)
 		return
 	}
 
@@ -656,7 +666,7 @@ func (p *Parser) LinkID() int {
 // Returns an error if called for any other type of token.
 func (p *Parser) Int() (int, error) {
 	if p.cur != TokenFixnum {
-		return 0, errors.Errorf("rmarsh.Parser.Int() called for wrong token: %s", p.cur)
+		return 0, errors.Errorf("Int() called on incorrect token %q", p.cur)
 	}
 	return p.num, nil
 }
@@ -666,7 +676,7 @@ func (p *Parser) Int() (int, error) {
 // Returns an error if called for any other type of token.
 func (p *Parser) Float() (float64, error) {
 	if p.cur != TokenFloat {
-		return 0, errors.Errorf("rmarsh.Parser.Float() called for wrong token: %s", p.cur)
+		return 0, errors.Errorf("Float() called on incorrect token %q", p.cur)
 	}
 
 	// Avoid some unnecessary allocations by constructing a raw string view over the bytes. This is safe because the
@@ -679,7 +689,7 @@ func (p *Parser) Float() (float64, error) {
 
 	flt, err := strconv.ParseFloat(str, 64)
 	if err != nil {
-		return 0, errors.Wrap(err, "rmarsh.Parser.Float()")
+		return 0, errors.Wrap(err, "failed to parse float")
 	}
 	return flt, nil
 }
@@ -689,7 +699,7 @@ func (p *Parser) Float() (float64, error) {
 // Returns an error if called for any other type of token.
 func (p *Parser) Bignum() (big.Int, error) {
 	if p.cur != TokenBignum {
-		return big.Int{}, errors.Errorf("rmarsh.Parser.Bignum() called for wrong token: %s", p.cur)
+		return big.Int{}, errors.Errorf("Bignum() called on incorrect token %q", p.cur)
 	}
 
 	wordsz := (p.ctx.end - p.ctx.beg + _S - 1) / _S
@@ -779,7 +789,7 @@ func (p *Parser) readNext() (tok Token, err error) {
 		// be doing safe read aheads.
 		err = p.fill(1)
 		if err != nil {
-			err = errors.Wrap(err, "read type id")
+			err = errors.Wrap(err, "error reading next token")
 			return
 		}
 	}
@@ -800,9 +810,6 @@ func (p *Parser) readNext() (tok Token, err error) {
 	case typeFixnum:
 		tok = TokenFixnum
 		p.num, err = p.long()
-		if err != nil {
-			err = errors.Wrap(err, "fixnum")
-		}
 		return
 	case typeFloat:
 		start := p.pos - 1
@@ -811,13 +818,13 @@ func (p *Parser) readNext() (tok Token, err error) {
 		// Float will be at least 2 more bytes - 1 for len and 1 for a digit
 		if p.pos+2 > p.end {
 			if err = p.fill(p.pos + 2 - p.end); err != nil {
-				err = errors.Wrap(err, "float")
+				err = errors.Wrap(err, "error reading float")
 				return
 			}
 		}
 
 		if p.ctx, err = p.sizedBlob(false); err != nil {
-			err = errors.Wrap(err, "float")
+			err = errors.Wrap(err, "error reading float")
 			return
 		}
 
@@ -833,7 +840,7 @@ func (p *Parser) readNext() (tok Token, err error) {
 		// Bignum will have at least 3 more bytes - 1 for sign, 1 for len and at least 1 digit.
 		if p.pos+3 > p.end {
 			if err = p.fill(p.pos + 3 - p.end); err != nil {
-				err = errors.Wrap(err, "bignum")
+				err = errors.Wrap(err, "error reading bignum")
 				return
 			}
 		}
@@ -842,7 +849,7 @@ func (p *Parser) readNext() (tok Token, err error) {
 		p.pos++
 
 		if p.ctx, err = p.sizedBlob(true); err != nil {
-			err = errors.Wrap(err, "bignum")
+			err = errors.Wrap(err, "error reading bignum")
 		}
 
 		// We only insert into the link table if we're the top level parser.
@@ -857,14 +864,14 @@ func (p *Parser) readNext() (tok Token, err error) {
 		// Symbol will be at least 2 more bytes - 1 for len and 1 for a char.
 		if p.pos+2 > p.end {
 			if err = p.fill(p.pos + 2 - p.end); err != nil {
-				err = errors.Wrap(err, "bignum")
+				err = errors.Wrap(err, "error reading bignum")
 				return
 			}
 		}
 
 		p.ctx, err = p.sizedBlob(false)
 		if err != nil {
-			err = errors.Wrap(err, "symbol")
+			err = errors.Wrap(err, "error reading symbol")
 			return
 		}
 
@@ -877,7 +884,7 @@ func (p *Parser) readNext() (tok Token, err error) {
 		tok = TokenString
 		start := p.pos - 1
 		if p.ctx, err = p.sizedBlob(false); err != nil {
-			err = errors.Wrap(err, "string")
+			err = errors.Wrap(err, "error reading string")
 		}
 		// We only insert into the link table if we're the top level parser.
 		if p.lnkID == -1 {
@@ -889,11 +896,11 @@ func (p *Parser) readNext() (tok Token, err error) {
 		var n int
 		n, err = p.long()
 		if err != nil {
-			err = errors.Wrap(err, "symlink id")
+			err = errors.Wrap(err, "error reading symlink id")
 			return
 		}
 		if n >= len(p.symTbl) {
-			err = errors.Errorf("Symlink id %d is larger than max known %d", n, len(p.symTbl)-1)
+			err = p.parserError("parsed unexpected symlink id %d, expected no higher than %d", n, len(p.symTbl)-1)
 			return
 		}
 		p.ctx = p.symTbl[n]
@@ -903,7 +910,7 @@ func (p *Parser) readNext() (tok Token, err error) {
 		start := p.pos - 1
 		p.num, err = p.long()
 		if err != nil {
-			err = errors.Wrap(err, "array")
+			err = errors.Wrap(err, "error reading array")
 			return
 		}
 		// We only insert into the link table if we're the top level parser.
@@ -916,7 +923,7 @@ func (p *Parser) readNext() (tok Token, err error) {
 		start := p.pos - 1
 		p.num, err = p.long()
 		if err != nil {
-			err = errors.Wrap(err, "hash")
+			err = errors.Wrap(err, "error reading hash")
 			return
 		}
 		// We only insert into the link table if we're the top level parser.
@@ -931,7 +938,7 @@ func (p *Parser) readNext() (tok Token, err error) {
 		tok = TokenLink
 		p.num, err = p.long()
 		if err != nil {
-			err = errors.Wrap(err, "link")
+			err = errors.Wrap(err, "error reading link")
 		}
 		return
 	case typeUsrMarshal:
@@ -943,7 +950,7 @@ func (p *Parser) readNext() (tok Token, err error) {
 		}
 		return
 	default:
-		err = errors.Errorf("Unhandled type %d encountered", typ)
+		err = p.parserError("Unhandled type %d encountered", typ)
 		return
 	}
 }
@@ -978,7 +985,7 @@ func (p *Parser) long() (n int, err error) {
 	if p.pos == p.end {
 		err = p.fill(1)
 		if err != nil {
-			err = errors.Wrap(err, "long")
+			err = errors.Wrap(err, "error parsing long")
 			return
 		}
 	}
@@ -1008,6 +1015,7 @@ func (p *Parser) long() (n int, err error) {
 	if p.pos+sz > p.end {
 		err = p.fill(p.pos + sz - p.end)
 		if err != nil {
+			err = errors.Wrap(err, "error parsing long")
 			return
 		}
 	}
@@ -1066,4 +1074,9 @@ func (p *Parser) fill(num int) (err error) {
 		err = errors.Wrap(err, "fill")
 	}
 	return
+}
+
+// Constructs a ParserError using the current pos of the Parser.
+func (p *Parser) parserError(format string, a ...interface{}) ParserError {
+	return ParserError{fmt.Sprintf(format, a...), p.pos}
 }

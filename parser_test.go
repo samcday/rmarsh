@@ -120,7 +120,7 @@ func TestParserFixnum(t *testing.T) {
 
 	p := parseFromRuby(t, "true")
 	p.Next()
-	if _, err := p.Int(); err == nil || err.Error() != "rmarsh.Parser.Int() called for wrong token: TokenTrue" {
+	if _, err := p.Int(); err == nil || err.Error() != `Int() called on incorrect token "TokenTrue"` {
 		t.Errorf("p.Int() unexpected err %s", err)
 	}
 }
@@ -172,7 +172,7 @@ func TestParserFloat(t *testing.T) {
 
 	p = parseFromRuby(t, "true")
 	p.Next()
-	if _, err := p.Float(); err == nil || err.Error() != "rmarsh.Parser.Float() called for wrong token: TokenTrue" {
+	if _, err := p.Float(); err == nil || err.Error() != `Float() called on incorrect token "TokenTrue"` {
 		t.Errorf("p.Float() unexpected err %s", err)
 	}
 }
@@ -225,7 +225,7 @@ func TestParserBignum(t *testing.T) {
 
 	p = parseFromRuby(t, "true")
 	p.Next()
-	if _, err := p.Float(); err == nil || err.Error() != "rmarsh.Parser.Float() called for wrong token: TokenTrue" {
+	if _, err := p.Float(); err == nil || err.Error() != `Float() called on incorrect token "TokenTrue"` {
 		t.Errorf("p.Float() unexpected err %s", err)
 	}
 }
