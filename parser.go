@@ -86,7 +86,8 @@ func (t Token) String() string {
 type Parser struct {
 	r io.Reader // Where we are pulling the Marshal stream bytes from
 
-	cur Token // The token we have most recently parsed
+	cur  Token // The token we have most recently parsed
+	prev Token // The last token we read
 
 	state  parserState
 	stack  parserStack
@@ -113,11 +114,15 @@ type rng struct{ beg, end int }
 // Range table
 type rngTbl []rng
 
-func (t *rngTbl) add(r rng) (id int) {
+func (t *rngTbl) add(r rng) (err error) {
+	// if r.beg > r.end {
+	// 	panic("shit")
+	// }
+
 	// We track the current parse sym table by slicing the underlying array.
 	// That is, if we've seen one symbol in the stream so far, len(p.symTbl) == 1 && cap(p.symTable) == rngTblInitSz
 	// Once we exceed cap, we double size of the tbl.
-	id = len(*t)
+	id := len(*t)
 	if c := cap(*t); id == c {
 		if c == 0 {
 			c = rngTblInitSz
@@ -415,19 +420,6 @@ func (p *Parser) Next() (tok Token, err error) {
 
 			p.state = parserStateIVarLen
 
-			// If the next state is a nested object (array, hash, etc) we nuke the saved range it has and put it on the ivar
-			// instead. This is so that an IVar'd hash/array/whatever will have a replay range that includes this IVar.
-			p.stack.cur().r = nil
-
-			// The lnk table item that just got saved needs to have its end scrubbed and it's beginning moved backwards by 1
-			// to ensure the replay includes this whole IVar.
-			r := &p.lnkTbl[len(p.lnkTbl)-1]
-			if p.lnkID == -1 {
-				r.beg--
-				r.end = 0
-			}
-			cur.r = r
-
 		case parserStateIVarLen:
 			cur := p.stack.cur()
 			if cur.typ != ctxIVar {
@@ -544,6 +536,7 @@ func (p *Parser) Next() (tok Token, err error) {
 		}
 	}
 
+	p.prev = p.cur
 	p.cur = tok
 
 	// Our state is woven through potentially many nested levels of context.
@@ -554,8 +547,10 @@ func (p *Parser) Next() (tok Token, err error) {
 	switch tok {
 	case TokenStartArray:
 		ctx := p.stack.push(ctxArray, p.num, p.state)
-		// Make sure to attach the range we added to the lnktbl in readNext()
-		ctx.r = &p.lnkTbl[len(p.lnkTbl)-1]
+		// Make sure to attach the range we added to the lnkTbl in readNext()
+		if p.lnkID == -1 {
+			ctx.r = &p.lnkTbl[len(p.lnkTbl)-1]
+		}
 		if p.num == 0 {
 			p.state = parserStateArrayEnd
 		} else {
@@ -563,15 +558,20 @@ func (p *Parser) Next() (tok Token, err error) {
 		}
 	case TokenStartHash:
 		ctx := p.stack.push(ctxHash, p.num, p.state)
-		// Make sure to attach the range we added to the lnktbl in readNext()
-		ctx.r = &p.lnkTbl[len(p.lnkTbl)-1]
+		// Make sure to attach the range we added to the lnkTbl in readNext()
+		if p.lnkID == -1 {
+			ctx.r = &p.lnkTbl[len(p.lnkTbl)-1]
+		}
 		if p.num == 0 {
 			p.state = parserStateHashEnd
 		} else {
 			p.state = parserStateHashKey
 		}
 	case TokenStartIVar:
-		p.stack.push(ctxIVar, 0, p.state)
+		ctx := p.stack.push(ctxIVar, 0, p.state)
+		if p.lnkID == -1 {
+			ctx.r = &p.lnkTbl[len(p.lnkTbl)-1]
+		}
 		p.state = parserStateIVarInit
 	case TokenUsrMarshal:
 		p.stack.push(ctxUsrMarshal, 0, p.state)
@@ -797,20 +797,24 @@ func (p *Parser) readNext() (tok Token, err error) {
 	typ := p.buf[p.pos]
 	p.pos++
 
+	// This can be set in the token parsing below. If it is, we'll push it as a new entry into the lnkTbl at the
+	// end of this method.
+	var newLnkEntry rng
+
 	switch typ {
 	case typeNil:
 		tok = TokenNil
-		return
+
 	case typeTrue:
 		tok = TokenTrue
-		return
+
 	case typeFalse:
 		tok = TokenFalse
-		return
+
 	case typeFixnum:
 		tok = TokenFixnum
 		p.num, err = p.long()
-		return
+
 	case typeFloat:
 		start := p.pos - 1
 		tok = TokenFloat
@@ -828,11 +832,8 @@ func (p *Parser) readNext() (tok Token, err error) {
 			return
 		}
 
-		// We only insert into the link table if we're the top level parser.
-		if p.lnkID == -1 {
-			p.lnkTbl.add(rng{start, p.pos})
-		}
-		return
+		newLnkEntry = rng{start, p.pos}
+
 	case typeBignum:
 		start := p.pos - 1
 		tok = TokenBignum
@@ -851,13 +852,8 @@ func (p *Parser) readNext() (tok Token, err error) {
 		if p.ctx, err = p.sizedBlob(true); err != nil {
 			err = errors.Wrap(err, "error reading bignum")
 		}
+		newLnkEntry = rng{start, p.pos}
 
-		// We only insert into the link table if we're the top level parser.
-		if p.lnkID == -1 {
-			p.lnkTbl.add(rng{start, p.pos})
-		}
-
-		return
 	case typeSymbol:
 		tok = TokenSymbol
 
@@ -877,20 +873,19 @@ func (p *Parser) readNext() (tok Token, err error) {
 
 		// We only insert into the symbol table if we're the top level parser.
 		if p.lnkID == -1 {
-			p.symTbl.add(p.ctx)
+			if err = p.symTbl.add(p.ctx); err != nil {
+				return
+			}
 		}
-		return
+
 	case typeString:
 		tok = TokenString
 		start := p.pos - 1
 		if p.ctx, err = p.sizedBlob(false); err != nil {
 			err = errors.Wrap(err, "error reading string")
 		}
-		// We only insert into the link table if we're the top level parser.
-		if p.lnkID == -1 {
-			p.lnkTbl.add(rng{start, p.pos})
-		}
-		return
+		newLnkEntry = rng{start, p.pos}
+
 	case typeSymlink:
 		tok = TokenSymbol
 		var n int
@@ -904,7 +899,7 @@ func (p *Parser) readNext() (tok Token, err error) {
 			return
 		}
 		p.ctx = p.symTbl[n]
-		return
+
 	case typeArray:
 		tok = TokenStartArray
 		start := p.pos - 1
@@ -913,11 +908,8 @@ func (p *Parser) readNext() (tok Token, err error) {
 			err = errors.Wrap(err, "error reading array")
 			return
 		}
-		// We only insert into the link table if we're the top level parser.
-		if p.lnkID == -1 {
-			p.lnkTbl.add(rng{start, 0})
-		}
-		return
+		newLnkEntry.beg = start
+
 	case typeHash:
 		tok = TokenStartHash
 		start := p.pos - 1
@@ -926,33 +918,40 @@ func (p *Parser) readNext() (tok Token, err error) {
 			err = errors.Wrap(err, "error reading hash")
 			return
 		}
-		// We only insert into the link table if we're the top level parser.
-		if p.lnkID == -1 {
-			p.lnkTbl.add(rng{start, 0})
-		}
-		return
+		newLnkEntry.beg = start
+
 	case typeIvar:
 		tok = TokenStartIVar
-		return
+		newLnkEntry.beg = p.pos - 1
+
 	case typeLink:
 		tok = TokenLink
 		p.num, err = p.long()
 		if err != nil {
 			err = errors.Wrap(err, "error reading link")
+			return
 		}
-		return
+
 	case typeUsrMarshal:
 		tok = TokenUsrMarshal
 		start := p.pos - 1
-		// We only insert into the link table if we're the top level parser.
-		if p.lnkID == -1 {
-			p.lnkTbl.add(rng{start, p.pos})
-		}
-		return
+
+		newLnkEntry.beg = start
+		// Wtf is this?
+		newLnkEntry.end = p.pos
+
 	default:
 		err = p.parserError("Unhandled type %d encountered", typ)
 		return
 	}
+
+	// If a new link table entry was specified whilst parsing this token, we insert it into the link table, but only if:
+	//  * We're in the top level parser (adding entries during replay parsing is nonsensical).
+	//  * The last token wasn't TokenStartIVar, in this case we already inserted a link table entry for this value,
+	if p.lnkID == -1 && newLnkEntry.beg > 0 && p.prev != TokenStartIVar {
+		err = p.lnkTbl.add(newLnkEntry)
+	}
+	return
 }
 
 // Strings, Symbols, Floats, Bignums and the like all begin with an encoded long
