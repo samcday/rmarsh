@@ -1,6 +1,7 @@
 package rmarsh
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"math/big"
@@ -598,6 +599,136 @@ func (p *Parser) ExpectNext(exp Token) (err error) {
 	return
 }
 
+// ExpectSymbol is a convenience method to ensure the Next() token is a Symbol, returning the symbol
+// that was read, or an error otherwise.
+func (p *Parser) ExpectSymbol() (sym string, err error) {
+	var tok Token
+	tok, err = p.Next()
+	if err != nil {
+		return
+	} else if tok != TokenSymbol {
+		err = p.parserError(`read token %q, expected "TokenSymbol"`, tok)
+	} else {
+		sym = string(p.buf[p.ctx.beg:p.ctx.end])
+	}
+	return
+}
+
+// ExpectUnsafeSymbol behaves like ExpectSymbol(), except it returns an unsafe string that is only valid
+// until the next call to Reset() on this parser.
+func (p *Parser) ExpectUnsafeSymbol() (sym string, err error) {
+	var tok Token
+	tok, err = p.Next()
+	if err != nil {
+		return
+	} else if tok != TokenSymbol {
+		err = p.parserError(`read token %q, expected "TokenSymbol"`, tok)
+	} else {
+		sym, err = p.UnsafeText()
+	}
+	return
+}
+
+// ExpectString is a convenience method that consumes a string from the next token. If the next token
+// is an IVar, it will be unwrapped and the encoding will be checked to ensure it's UTF-8.
+func (p *Parser) ExpectString() (str string, err error) {
+	var tok Token
+	if tok, err = p.Next(); err != nil {
+		return
+	}
+
+	if tok == TokenLink {
+		var subp *Parser
+		if subp, err = p.Replay(p.num); err != nil {
+			return
+		}
+		return subp.ExpectString()
+	}
+
+	if tok == TokenString {
+		str = string(p.buf[p.ctx.beg:p.ctx.end])
+		return
+	}
+
+	if tok == TokenStartIVar {
+		if tok, err = p.Next(); err != nil {
+			return
+		} else if tok != TokenString {
+			err = p.parserError("invalid token %q - expected string", tok)
+			return
+		}
+
+		str = string(p.buf[p.ctx.beg:p.ctx.end])
+
+		if tok, err = p.Next(); err != nil {
+			return
+		} else if tok != TokenIVarProps {
+			err = p.parserError("invalid token %q - expected ivar props", tok)
+			return
+		}
+
+		isUTF8 := false
+		for {
+			if tok, err = p.Next(); err != nil {
+				return
+			} else if tok == TokenEndIVar {
+				break
+			} else if tok != TokenSymbol {
+				err = p.parserError("invalid token %q - expected symbol", tok)
+				return
+			}
+
+			if bytes.Equal(p.buf[p.ctx.beg:p.ctx.end], []byte{'E'}) {
+				if tok, err = p.Next(); err != nil {
+					return
+				} else if tok == TokenTrue {
+					isUTF8 = true
+				}
+			} else {
+				if err = p.Skip(); err != nil {
+					return
+				}
+			}
+		}
+
+		if !isUTF8 {
+			err = p.parserError("read a string that is not UTF-8")
+		}
+
+		return
+	}
+
+	err = p.parserError("invalid token %q - expected string or ivar string", tok)
+	return
+}
+
+// ExpectUsrMarshal is a convience method to ensure the Next() token is a TokenUsrMarshal, and that
+// its class name matches the provided name.
+func (p *Parser) ExpectUsrMarshal(name string) (err error) {
+	var tok Token
+
+	if tok, err = p.Next(); err != nil {
+		return
+	}
+
+	if tok == TokenLink {
+		var subp *Parser
+		if subp, err = p.Replay(p.num); err != nil {
+			return
+		}
+		return subp.ExpectUsrMarshal(name)
+	}
+
+	var sym string
+	if sym, err = p.ExpectUnsafeSymbol(); err != nil {
+		return
+	}
+	if sym != name {
+		err = p.parserError("expected UsrMarshal of class %q but got %q", name, sym)
+	}
+	return
+}
+
 // Skip examines the current token, and will continuously read tokens until the current
 // object is fully consumed. Does nothing for single token types like Fixnum, Bool, Nil, Bignum,
 // String, Symbol, etc.
@@ -948,7 +1079,7 @@ func (p *Parser) readNext() (tok Token, err error) {
 	// If a new link table entry was specified whilst parsing this token, we insert it into the link table, but only if:
 	//  * We're in the top level parser (adding entries during replay parsing is nonsensical).
 	//  * The last token wasn't TokenStartIVar, in this case we already inserted a link table entry for this value,
-	if p.lnkID == -1 && newLnkEntry.beg > 0 && p.prev != TokenStartIVar {
+	if p.lnkID == -1 && newLnkEntry.beg > 0 && p.state != parserStateIVarInit {
 		err = p.lnkTbl.add(newLnkEntry)
 	}
 	return
