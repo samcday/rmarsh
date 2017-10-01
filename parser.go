@@ -528,6 +528,10 @@ func (p *Parser) Next() (tok Token, err error) {
 				return
 			}
 
+			if cur.r != nil {
+				cur.r.end = p.pos
+			}
+
 			p.state = p.stack.pop()
 
 		// our EOF state - once we're here we continue to transition to the same state
@@ -575,7 +579,10 @@ func (p *Parser) Next() (tok Token, err error) {
 		}
 		p.state = parserStateIVarInit
 	case TokenUsrMarshal:
-		p.stack.push(ctxUsrMarshal, 0, p.state)
+		ctx := p.stack.push(ctxUsrMarshal, 0, p.state)
+		if p.lnkID == -1 {
+			ctx.r = &p.lnkTbl[len(p.lnkTbl)-1]
+		}
 		p.state = parserStateUsrMarshalInit
 	}
 
@@ -1068,8 +1075,6 @@ func (p *Parser) readNext() (tok Token, err error) {
 		start := p.pos - 1
 
 		newLnkEntry.beg = start
-		// Wtf is this?
-		newLnkEntry.end = p.pos
 
 	default:
 		err = p.parserError("Unhandled type %d encountered", typ)
