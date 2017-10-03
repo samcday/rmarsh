@@ -229,29 +229,13 @@ pullbytes:
 
 	case typeFixnum:
 		tok = TokenFixnum
-		// num, err = p.long()
-
-		if p.pos+rd+1 > p.buflen {
-			needed = 1
-			goto pullbytes
-		}
-		rd++
 
 		var sz int
-		num, sz = p.readLongByte(p.buf[p.pos+1])
-		if sz > 0 && p.pos+rd+sz > p.buflen {
-			needed = p.pos + rd + sz - p.buflen
+		num, sz, needed = p.decodeLong(p.pos + rd)
+		if needed > 0 {
 			goto pullbytes
-		} else if sz > 0 {
-			for i := 0; i < sz; i++ {
-				if num < 0 {
-					num &= ^(0xff << uint(8*i))
-				}
-
-				num |= int(p.buf[p.pos+rd]) << uint(8*i)
-				rd++
-			}
 		}
+		rd += sz
 	}
 
 	p.pos += rd
@@ -259,119 +243,54 @@ pullbytes:
 	return
 }
 
-// Given an encoded byte, determines if it represents a concrete long or the number of bytes
-// needed to decode the real long.
-func (p *Parser) readLongByte(b byte) (n int, sz int) {
-	n = int(int8(b))
+// decodeLong looks at a long in the read buffer at given pos and decodes it.
+// It will return either the decoded num, or the number of extra bytes it needs available
+// in the read buffer to complete decoding.
+func (p *Parser) decodeLong(pos int) (n, sz, need int) {
+	if pos == p.buflen {
+		// A pretty shitty situation to end up in, unless we happen to be reading a Marshal stream
+		// that only contains a single fixnum.
+		need = 1
+		return
+	}
+
+	// Can finish early if the num is 0.
+	if p.buf[pos] == 0 {
+		return
+	}
+
+	n = int(int8(p.buf[pos]))
+
+	// Easy ones first: single byte longs.
 	if 4 < n && n < 128 {
 		n = n - 5
+		return
 	} else if -129 < n && n < -4 {
 		n = n + 5
+		return
 	} else if n > 0 {
 		sz = n
 		n = 0
-	} else if n != 0 {
+	} else {
 		sz = -n
 		n = -1
 	}
 
+	if pos+1+sz > p.buflen {
+		need = pos + sz + 1 - p.buflen
+		return
+	}
+
+	for i := 0; i < sz; i++ {
+		if n < 0 {
+			n &= ^(0xff << uint(8*i))
+		}
+
+		n |= int(p.buf[pos+1+i]) << uint(8*i)
+	}
+
 	return
 }
-
-// func (p *Parser) long() (n int, err error) {
-// 	if p.pos == p.buflen {
-// 		err = p.fill(1)
-// 		if err != nil {
-// 			err = errors.Wrap(err, "error parsing long")
-// 			return
-// 		}
-// 	}
-
-// 	n = int(int8(p.buf[p.pos]))
-// 	p.pos++
-// 	if n == 0 {
-// 		return
-// 	} else if 4 < n && n < 128 {
-// 		n = n - 5
-// 		return
-// 	} else if -129 < n && n < -4 {
-// 		n = n + 5
-// 		return
-// 	}
-
-// 	// It's a multibyte positive/negative num.
-// 	var sz int
-// 	if n > 0 {
-// 		sz = n
-// 		n = 0
-// 	} else {
-// 		sz = -n
-// 		n = -1
-// 	}
-
-// 	if p.pos+sz > p.buflen {
-// 		err = p.fill(p.pos + sz - p.buflen)
-// 		if err != nil {
-// 			err = errors.Wrap(err, "error parsing long")
-// 			return
-// 		}
-// 	}
-
-// 	for i := 0; i < sz; i++ {
-// 		if n < 0 {
-// 			n &= ^(0xff << uint(8*i))
-// 		}
-
-// 		n |= int(p.buf[p.pos]) << uint(8*i)
-// 		p.pos++
-// 	}
-
-// 	return
-// }
-
-// pull bytes from the io.Reader into our read buffer
-// func (p *Parser) fill(num int) (err error) {
-// 	// We don't do actual reads in sub Parser, the data is already in the buffer.
-// 	// if p.lnkID > -1 {
-// 	// 	return errors.Errorf("fill() called on replay Parser")
-// 	// }
-
-// 	// Whenever we go to pull bytes from the source, we prefetch as much as possible. We do this by examining the current
-// 	// stack. For example if we're processing an array with 500 elements and we've currently parsing element 232, then we
-// 	// know there's at *least* 267 bytes to come (even if every following element was just a single nil byte).
-// 	for i := len(p.stack) - 1; i >= 0; i-- {
-// 		if n := p.stack[i].sz - p.stack[i].pos - 1; n > 0 {
-// 			num += n
-// 		}
-// 	}
-
-// 	from, to := p.buflen, p.buflen+num
-
-// 	if to > p.bufcap {
-// 		// Overflowed our read buffer, allocate a new one double the current size, or the required size if it's larger.
-// 		p.bufcap = p.bufcap * 2
-// 		if p.bufcap < to {
-// 			p.bufcap = to
-// 		}
-// 		buf := make([]byte, p.bufcap)
-// 		copy(buf, p.buf[0:p.buflen])
-// 		p.buf = buf
-// 	}
-
-// 	p.buflen += num
-
-// 	var n int
-// 	for from < to && err == nil {
-// 		n, err = p.r.Read(p.buf[from:to])
-// 		from += n
-// 	}
-// 	if err == io.EOF {
-// 		err = io.ErrUnexpectedEOF
-// 	} else if err != nil {
-// 		err = errors.Wrap(err, "fill")
-// 	}
-// 	return
-// }
 
 // Constructs a ParserError using the current pos of the Parser.
 func (p *Parser) parserError(format string, a ...interface{}) ParserError {
