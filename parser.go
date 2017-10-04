@@ -236,6 +236,37 @@ pullbytes:
 			goto pullbytes
 		}
 		rd += sz
+
+	case typeFloat:
+		// start := p.pos
+		tok = TokenFloat
+
+		// // Float will be at least 2 more bytes - 1 for len and 1 for a digit
+		// if p.pos+2 > p.buflen {
+		// 	if err = p.fill(p.pos + 2 - p.buflen); err != nil {
+		// 		err = errors.Wrap(err, "error reading float")
+		// 		return
+		// 	}
+		// }
+
+		var blobsz, sz int
+		blobsz, sz, needed = p.decodeLong(p.pos + rd)
+		if needed > 0 {
+			// We can prefetch at least one more byte if we need to go back for more bytes to decode the long.
+			// This is because after the long there's at least one byte of actual float data.
+			needed += 1
+			goto pullbytes
+		}
+		rd += sz
+
+		if p.pos+rd+blobsz > p.buflen {
+			needed = p.pos + rd + blobsz - p.buflen
+			goto pullbytes
+		}
+
+		b = p.buf[p.pos+rd : p.pos+rd+blobsz]
+
+		// newLnkEntry = rng{start, p.pos}
 	}
 
 	p.pos += rd
@@ -247,6 +278,8 @@ pullbytes:
 // It will return either the decoded num, or the number of extra bytes it needs available
 // in the read buffer to complete decoding.
 func (p *Parser) decodeLong(pos int) (n, sz, need int) {
+	sz = 1
+
 	if pos == p.buflen {
 		// A pretty shitty situation to end up in, unless we happen to be reading a Marshal stream
 		// that only contains a single fixnum.

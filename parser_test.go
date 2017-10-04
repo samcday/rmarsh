@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/samcday/rmarsh"
@@ -154,5 +155,52 @@ func BenchmarkParserFixnumMultiByte(b *testing.B) {
 		} else if n != 0xBEEF {
 			b.Fatalf("%v %v", n, err)
 		}
+	}
+}
+
+func TestParserFloat(t *testing.T) {
+	p := parseFromRuby(t, "123.321")
+	b, _ := expectToken(t, p, rmarsh.TokenFloat)
+	if n, err := strconv.ParseFloat(string(b), 64); err != nil {
+		t.Errorf("p.Float() err %s", err)
+	} else if n != 123.321 {
+		t.Errorf("p.Float() = %f, expected 123.321", n)
+	}
+	expectToken(t, p, rmarsh.TokenEOF)
+}
+
+func BenchmarkParserFloatSingleByte(b *testing.B) {
+	buf := newCyclicReader(rbEncode(b, "1.to_f"))
+	p := rmarsh.NewParser(buf)
+
+	for i := 0; i < b.N; i++ {
+		p.Reset(nil)
+
+		if tok, _, _, err := p.Read(); err != nil {
+			b.Fatal(err)
+		} else if tok != rmarsh.TokenFloat {
+			b.Fatalf("Unexpected token %s", tok)
+		}
+		// if f, err := p.Float(); err != nil || f != 1 {
+		// 	b.Fatalf("%v %v", f, err)
+		// }
+	}
+}
+
+func BenchmarkParserFloatMultiByte(b *testing.B) {
+	buf := newCyclicReader(rbEncode(b, "123.321"))
+	p := rmarsh.NewParser(buf)
+
+	for i := 0; i < b.N; i++ {
+		p.Reset(nil)
+
+		if tok, _, _, err := p.Read(); err != nil {
+			b.Fatal(err)
+		} else if tok != rmarsh.TokenFloat {
+			b.Fatalf("Unexpected token %s", tok)
+		}
+		// if f, err := p.Float(); err != nil || f != 123.321 {
+		// 	b.Fatalf("%v %v", f, err)
+		// }
 	}
 }

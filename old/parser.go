@@ -681,25 +681,6 @@ func (p *Parser) readNext() (tok Token, err error) {
 
 	switch typ {
 
-	case typeFloat:
-		start := p.pos - 1
-		tok = TokenFloat
-
-		// Float will be at least 2 more bytes - 1 for len and 1 for a digit
-		if p.pos+2 > p.buflen {
-			if err = p.fill(p.pos + 2 - p.buflen); err != nil {
-				err = errors.Wrap(err, "error reading float")
-				return
-			}
-		}
-
-		if p.ctx, err = p.sizedBlob(false); err != nil {
-			err = errors.Wrap(err, "error reading float")
-			return
-		}
-
-		newLnkEntry = rng{start, p.pos}
-
 	case typeBignum:
 		start := p.pos - 1
 		tok = TokenBignum
