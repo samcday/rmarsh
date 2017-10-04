@@ -25,9 +25,6 @@ type Parser struct {
 	num      int
 	bnumbits []big.Word
 	bnumsign byte
-
-	symTbl rngTbl // Store ranges marking the symbols we've parsed in the read buffer.
-	lnkTbl rngTbl // Store ranges marking the linkable objects we've parsed in the read buffer.
 }
 
 // NewParser constructs a new parser that streams data from the given io.Reader
@@ -700,30 +697,6 @@ func (p *Parser) readNext() (tok Token, err error) {
 			err = errors.Wrap(err, "error reading bignum")
 		}
 		newLnkEntry = rng{start, p.pos}
-
-	case typeSymbol:
-		tok = TokenSymbol
-
-		// Symbol will be at least 2 more bytes - 1 for len and 1 for a char.
-		if p.pos+2 > p.buflen {
-			if err = p.fill(p.pos + 2 - p.buflen); err != nil {
-				err = errors.Wrap(err, "error reading bignum")
-				return
-			}
-		}
-
-		p.ctx, err = p.sizedBlob(false)
-		if err != nil {
-			err = errors.Wrap(err, "error reading symbol")
-			return
-		}
-
-		// We only insert into the symbol table if we're the top level parser.
-		if p.lnkID == -1 {
-			if err = p.symTbl.add(p.ctx); err != nil {
-				return
-			}
-		}
 
 	case typeString:
 		tok = TokenString

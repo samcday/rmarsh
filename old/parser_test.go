@@ -35,55 +35,6 @@ func BenchmarkParserBignum(b *testing.B) {
 	}
 }
 
-func TestParserSymbol(t *testing.T) {
-	p := parseFromRuby(t, ":test")
-	expectToken(t, p, rmarsh.TokenSymbol)
-	if str, err := p.Text(); err != nil {
-		t.Errorf("p.Text() err %s", err)
-	} else if str != "test" {
-		t.Errorf("p.Text() = %s, expected test", str)
-	}
-	expectToken(t, p, rmarsh.TokenEOF)
-}
-
-func BenchmarkParserSymbolSingleByte(b *testing.B) {
-	buf := newCyclicReader(rbEncode(b, ":E"))
-	p := rmarsh.NewParser(buf)
-	exp := []byte("E")
-
-	for i := 0; i < b.N; i++ {
-		p.Reset(nil)
-
-		if tok, err := p.Next(); err != nil {
-			b.Fatal(err)
-		} else if tok != rmarsh.TokenSymbol {
-			b.Fatalf("Unexpected token %s", tok)
-		}
-		if !bytes.Equal(p.UnsafeBytes(), exp) {
-			b.Fatalf("%s != test", p.UnsafeBytes())
-		}
-	}
-}
-
-func BenchmarkParserSymbolMultiByte(b *testing.B) {
-	buf := newCyclicReader(rbEncode(b, ":test"))
-	p := rmarsh.NewParser(buf)
-	exp := []byte("test")
-
-	for i := 0; i < b.N; i++ {
-		p.Reset(nil)
-
-		if tok, err := p.Next(); err != nil {
-			b.Fatal(err)
-		} else if tok != rmarsh.TokenSymbol {
-			b.Fatalf("Unexpected token %s", tok)
-		}
-		if !bytes.Equal(p.UnsafeBytes(), exp) {
-			b.Fatalf("%s != test", p.UnsafeBytes())
-		}
-	}
-}
-
 func TestParserString(t *testing.T) {
 	// We generate this string in a convoluted way so it has no encoding (and thus no IVar)
 	p := parseFromRuby(t, `"test".force_encoding("ASCII-8BIT")`)

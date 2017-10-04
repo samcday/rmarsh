@@ -89,6 +89,10 @@ type Parser struct {
 
 	state parserState
 	stack parserStack
+
+	lnkTbl rngTbl // Store ranges marking the linkable objects we've parsed in the read buffer.
+	symTbl rngTbl // Store ranges marking the symbols we've parsed in the read buffer.
+
 }
 
 func NewParser(r io.Reader) *Parser {
@@ -216,6 +220,7 @@ pullbytes:
 
 	typ := p.buf[p.pos]
 	rd := 1
+	linkable := false
 
 	switch typ {
 	case typeNil:
@@ -241,14 +246,6 @@ pullbytes:
 		// start := p.pos
 		tok = TokenFloat
 
-		// // Float will be at least 2 more bytes - 1 for len and 1 for a digit
-		// if p.pos+2 > p.buflen {
-		// 	if err = p.fill(p.pos + 2 - p.buflen); err != nil {
-		// 		err = errors.Wrap(err, "error reading float")
-		// 		return
-		// 	}
-		// }
-
 		var blobsz, sz int
 		blobsz, sz, needed = p.decodeLong(p.pos + rd)
 		if needed > 0 {
@@ -265,10 +262,42 @@ pullbytes:
 		}
 
 		b = p.buf[p.pos+rd : p.pos+rd+blobsz]
+		rd += blobsz
+		linkable = true
 
-		// newLnkEntry = rng{start, p.pos}
+	case typeSymbol:
+		tok = TokenSymbol
+
+		var blobsz, sz int
+		blobsz, sz, needed = p.decodeLong(p.pos + rd)
+		if needed > 0 {
+			// We can prefetch at least one more byte if we need to go back for more bytes to decode the long.
+			// This is because after the long there's at least one byte of actual symbol data.
+			needed += 1
+			goto pullbytes
+		}
+		rd += sz
+
+		if p.pos+rd+blobsz > p.buflen {
+			needed = p.pos + rd + blobsz - p.buflen
+			goto pullbytes
+		}
+
+		b = p.buf[p.pos+rd : p.pos+rd+blobsz]
+		rd += blobsz
+		linkable = true
+
+		// We only insert into the symbol table if we're the top level parser.
+		// if p.lnkID == -1 {
+		if err = p.symTbl.add(rng{p.pos + rd, p.pos + rd + blobsz}); err != nil {
+			return
+		}
+		// }
 	}
 
+	if linkable {
+		p.lnkTbl.add(rng{p.pos, p.pos + rd})
+	}
 	p.pos += rd
 
 	return

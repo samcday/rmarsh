@@ -181,9 +181,6 @@ func BenchmarkParserFloatSingleByte(b *testing.B) {
 		} else if tok != rmarsh.TokenFloat {
 			b.Fatalf("Unexpected token %s", tok)
 		}
-		// if f, err := p.Float(); err != nil || f != 1 {
-		// 	b.Fatalf("%v %v", f, err)
-		// }
 	}
 }
 
@@ -199,8 +196,51 @@ func BenchmarkParserFloatMultiByte(b *testing.B) {
 		} else if tok != rmarsh.TokenFloat {
 			b.Fatalf("Unexpected token %s", tok)
 		}
-		// if f, err := p.Float(); err != nil || f != 123.321 {
-		// 	b.Fatalf("%v %v", f, err)
-		// }
+	}
+}
+
+func TestParserSymbol(t *testing.T) {
+	p := parseFromRuby(t, ":test")
+	b, _ := expectToken(t, p, rmarsh.TokenSymbol)
+	str := string(b)
+	if str != "test" {
+		t.Errorf("p.Text() = %s, expected test", str)
+	}
+	expectToken(t, p, rmarsh.TokenEOF)
+}
+
+func BenchmarkParserSymbolSingleByte(b *testing.B) {
+	buf := newCyclicReader(rbEncode(b, ":E"))
+	p := rmarsh.NewParser(buf)
+	exp := []byte("E")
+
+	for i := 0; i < b.N; i++ {
+		p.Reset(nil)
+
+		if tok, data, _, err := p.Read(); err != nil {
+			b.Fatal(err)
+		} else if tok != rmarsh.TokenSymbol {
+			b.Fatalf("Unexpected token %s", tok)
+		} else if !bytes.Equal(data, exp) {
+			b.Fatalf("%s != test", data)
+		}
+	}
+}
+
+func BenchmarkParserSymbolMultiByte(b *testing.B) {
+	buf := newCyclicReader(rbEncode(b, ":test"))
+	p := rmarsh.NewParser(buf)
+	exp := []byte("test")
+
+	for i := 0; i < b.N; i++ {
+		p.Reset(nil)
+
+		if tok, data, _, err := p.Read(); err != nil {
+			b.Fatal(err)
+		} else if tok != rmarsh.TokenSymbol {
+			b.Fatalf("Unexpected token %s", tok)
+		} else if !bytes.Equal(data, exp) {
+			b.Fatalf("%s != test", data)
+		}
 	}
 }
