@@ -144,6 +144,10 @@ func (p *Parser) Read() (tok Token, b []byte, num int, err error) {
 	// This code would be WAY less complicated if we just filled the buffer with method calls when needed...
 	// But that costs too many precious nanos.
 	needed := 0
+	numRead := false
+	pleaseReadNumAt := 0
+	numSz := 0
+
 pullbytes:
 	if needed > 0 {
 		// TODO: port over the stack-based prefetch here.
@@ -177,6 +181,54 @@ pullbytes:
 		}
 
 		needed = 0
+	}
+
+readNum:
+	if pleaseReadNumAt > 0 {
+		numSz = 1
+
+		if pleaseReadNumAt == p.buflen {
+			// A pretty shitty situation to end up in, unless we happen to be reading a Marshal stream
+			// that only contains a single fixnum.
+			needed = 1
+			goto pullbytes
+		}
+
+		num = int(int8(p.buf[pleaseReadNumAt]))
+
+		// Can finish early if the num is 0.
+		if num != 0 {
+			// Easy ones first: single byte longs.
+			if 4 < num && num < 128 {
+				num = num - 5
+			} else if -129 < num && num < -4 {
+				num = num + 5
+			} else {
+				if num > 0 {
+					numSz = num
+					num = 0
+				} else {
+					numSz = -num
+					num = -1
+				}
+
+				if pleaseReadNumAt+1+numSz > p.buflen {
+					needed = pleaseReadNumAt + numSz + 1 - p.buflen
+					goto pullbytes
+				}
+
+				for i := 0; i < numSz; i++ {
+					if num < 0 {
+						num &= ^(0xff << uint(8*i))
+					}
+
+					num |= int(p.buf[pleaseReadNumAt+1+i]) << uint(8*i)
+				}
+			}
+		}
+
+		numRead = true
+		pleaseReadNumAt = 0
 	}
 
 	// RUN THE STATE MACHINE
@@ -235,12 +287,12 @@ pullbytes:
 	case typeFixnum:
 		tok = TokenFixnum
 
-		var sz int
-		num, sz, needed = p.decodeLong(p.pos + rd)
-		if needed > 0 {
-			goto pullbytes
+		if !numRead {
+			pleaseReadNumAt = p.pos + rd
+			goto readNum
 		}
-		rd += sz
+
+		rd += numSz
 
 	case typeFloat:
 		// start := p.pos
