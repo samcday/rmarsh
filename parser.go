@@ -123,8 +123,8 @@ func (p *Parser) Reset(r io.Reader) {
 	}
 	p.pos = 0
 	p.buflen = 0
-	// p.symTbl = p.symTbl[0:0]
-	// p.lnkTbl = p.lnkTbl[0:0]
+	p.symTbl = p.symTbl[0:0]
+	p.lnkTbl = p.lnkTbl[0:0]
 }
 
 func (p *Parser) Read() (tok Token, b []byte, num int, err error) {
