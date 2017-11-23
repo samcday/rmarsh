@@ -33,8 +33,7 @@ type Generator struct {
 	c  int
 	st genState
 
-	buf  []byte
-	bufn int
+	buf []byte
 
 	symCount int
 	symTbl   []string
@@ -44,8 +43,8 @@ type Generator struct {
 // thread safe, but can be reused for new Marshal streams by calling Reset().
 func NewGenerator(w io.Writer) *Generator {
 	gen := &Generator{
+		buf: make([]byte, 0, 128),
 		w:   w,
-		buf: make([]byte, 128),
 	}
 	gen.st.stack = make([]genStateItem, genStateGrowSize)
 	gen.Reset(nil)
@@ -65,9 +64,7 @@ func (gen *Generator) Reset(w io.Writer) {
 	gen.c = 0
 	gen.symCount = 0
 
-	gen.buf[0] = 0x04
-	gen.buf[1] = 0x08
-	gen.bufn = 2
+	gen.buf = append(gen.buf[:0], 0x04, 0x08)
 }
 
 // Nil writes the nil value to the Marshal stream.
@@ -76,8 +73,7 @@ func (gen *Generator) Nil() error {
 		return err
 	}
 
-	gen.buf[gen.bufn] = typeNil
-	gen.bufn++
+	gen.buf = append(gen.buf, typeNil)
 	return gen.writeAdv()
 }
 
@@ -88,11 +84,10 @@ func (gen *Generator) Bool(b bool) error {
 	}
 
 	if b {
-		gen.buf[gen.bufn] = typeTrue
+		gen.buf = append(gen.buf, typeTrue)
 	} else {
-		gen.buf[gen.bufn] = typeFalse
+		gen.buf = append(gen.buf, typeFalse)
 	}
-	gen.bufn++
 
 	return gen.writeAdv()
 }
@@ -111,8 +106,7 @@ func (gen *Generator) Fixnum(n int64) error {
 		return err
 	}
 
-	gen.buf[gen.bufn] = typeFixnum
-	gen.bufn++
+	gen.buf = append(gen.buf, typeFixnum)
 	gen.encodeLong(n)
 	return gen.writeAdv()
 }
@@ -148,22 +142,18 @@ func (gen *Generator) Bignum(b *big.Int) error {
 		return err
 	}
 
-	gen.buf[gen.bufn] = typeBignum
-	gen.bufn++
 	if b.Sign() < 0 {
-		gen.buf[gen.bufn] = '-'
+		gen.buf = append(gen.buf, typeBignum, '-')
 	} else {
-		gen.buf[gen.bufn] = '+'
+		gen.buf = append(gen.buf, typeBignum, '+')
 	}
-	gen.bufn++
 
 	gen.encodeLong(int64(math.Ceil(float64(sz) / 2)))
 
 	w := 0
 	for i, d := range bits {
 		for j := 0; j < _S; j++ {
-			gen.buf[gen.bufn] = byte(d)
-			gen.bufn++
+			gen.buf = append(gen.buf, byte(d))
 			w++
 			d >>= 8
 			if d == 0 && i == l-1 {
@@ -173,8 +163,7 @@ func (gen *Generator) Bignum(b *big.Int) error {
 	}
 
 	for w < sz {
-		gen.buf[gen.bufn] = 0
-		gen.bufn++
+		gen.buf = append(gen.buf, 0)
 		w++
 	}
 
@@ -192,20 +181,15 @@ func (gen *Generator) writeSym(sym string) {
 
 	for i := 0; i < gen.symCount; i++ {
 		if gen.symTbl[i] == sym {
-			gen.buf[gen.bufn] = typeSymlink
-			gen.bufn++
+			gen.buf = append(gen.buf, typeSymlink)
 			gen.encodeLong(int64(i))
 			return
 		}
 	}
 
-	l := len(sym)
-	gen.buf[gen.bufn] = typeSymbol
-	gen.bufn++
-	gen.encodeLong(int64(l))
-	copy(gen.buf[gen.bufn:], sym)
-	gen.bufn += l
-
+	gen.buf = append(gen.buf, typeSymbol)
+	gen.encodeLong(int64(len(sym)))
+	gen.buf = append(gen.buf, sym...)
 	gen.symTbl[gen.symCount] = sym
 	gen.symCount++
 }
@@ -225,10 +209,8 @@ func (gen *Generator) Symbol(sym string) error {
 
 // Writes given string to stream but does not check state or advance it.
 func (gen *Generator) writeString(str string) {
-	l := len(str)
-	gen.encodeLong(int64(l))
-	copy(gen.buf[gen.bufn:], str)
-	gen.bufn += l
+	gen.encodeLong(int64(len(str)))
+	gen.buf = append(gen.buf, str...)
 }
 
 // String writes the given string to the Marshal stream.
@@ -239,10 +221,8 @@ func (gen *Generator) String(str string) error {
 		return err
 	}
 
-	gen.buf[gen.bufn] = typeString
-	gen.bufn++
+	gen.buf = append(gen.buf, typeString)
 	gen.writeString(str)
-
 	return gen.writeAdv()
 }
 
@@ -254,18 +234,16 @@ func (gen *Generator) Float(f float64) error {
 		return err
 	}
 
-	gen.buf[gen.bufn] = typeFloat
-	gen.bufn++
+	// We append a "0" placeholder for the length of the float
+	// encoding. The max value this can hold is 7B (123), while
+	// the float will be have fewer than 20 decimal digits.
+	gen.buf = append(gen.buf, typeFloat, 0)
+	lenAt := len(gen.buf) - 1
 
-	// We pass a 0 len slice of our scratch buffer to append float.
-	// This ensures it makes no allocation since the append() calls it makes
-	// will just consume existing capacity.
-	b := strconv.AppendFloat(gen.buf[gen.bufn+1:gen.bufn+1:len(gen.buf)], f, 'g', -1, 64)
-	l := len(b)
-
-	gen.encodeLong(int64(l))
-	gen.bufn += l
-
+	// Append the decimal float to the buffer and then update
+	// length using the same algorithm as encodeLong(..)
+	gen.buf = strconv.AppendFloat(gen.buf, f, 'g', -1, 64)
+	gen.buf[lenAt] = byte(4 + len(gen.buf) - lenAt)
 	return gen.writeAdv()
 }
 
@@ -275,10 +253,9 @@ func (gen *Generator) StartArray(l int) error {
 	if err := gen.checkState(false, 1+fixnumMaxBytes); err != nil {
 		return err
 	}
-	gen.buf[gen.bufn] = typeArray
-	gen.bufn++
-	gen.encodeLong(int64(l))
 
+	gen.buf = append(gen.buf, typeArray)
+	gen.encodeLong(int64(l))
 	gen.st.push(genStArr, l)
 	return nil
 }
@@ -302,10 +279,9 @@ func (gen *Generator) StartHash(l int) error {
 	if err := gen.checkState(false, 1+fixnumMaxBytes); err != nil {
 		return err
 	}
-	gen.buf[gen.bufn] = typeHash
-	gen.bufn++
-	gen.encodeLong(int64(l))
 
+	gen.buf = append(gen.buf, typeHash)
+	gen.encodeLong(int64(l))
 	gen.st.push(genStHash, l*2)
 	return nil
 }
@@ -330,12 +306,9 @@ func (gen *Generator) Class(name string) error {
 		return err
 	}
 
-	gen.buf[gen.bufn] = typeClass
-	gen.bufn++
+	gen.buf = append(gen.buf, typeClass)
 	gen.encodeLong(int64(l))
-	copy(gen.buf[gen.bufn:], name)
-	gen.bufn += l
-
+	gen.buf = append(gen.buf, name...)
 	return gen.writeAdv()
 }
 
@@ -346,12 +319,9 @@ func (gen *Generator) Module(name string) error {
 		return err
 	}
 
-	gen.buf[gen.bufn] = typeModule
-	gen.bufn++
+	gen.buf = append(gen.buf, typeModule)
 	gen.encodeLong(int64(l))
-	copy(gen.buf[gen.bufn:], name)
-	gen.bufn += l
-
+	gen.buf = append(gen.buf, name...)
 	return gen.writeAdv()
 }
 
@@ -362,9 +332,8 @@ func (gen *Generator) StartIVar(l int) error {
 	if err := gen.checkState(false, 1+fixnumMaxBytes); err != nil {
 		return err
 	}
-	gen.buf[gen.bufn] = typeIvar
-	gen.bufn++
 
+	gen.buf = append(gen.buf, typeIvar)
 	gen.st.push(genStIVar, l*2)
 
 	// We move the current pos on the ivar to -1, since the next write does not count toward the number of instance
@@ -394,13 +363,10 @@ func (gen *Generator) StartObject(name string, l int) error {
 	if err := gen.checkState(false, 1+1+fixnumMaxBytes+len(name)+fixnumMaxBytes); err != nil {
 		return err
 	}
-	gen.buf[gen.bufn] = typeObject
-	gen.bufn++
 
+	gen.buf = append(gen.buf, typeObject)
 	gen.writeSym(name)
-
 	gen.encodeLong(int64(l))
-
 	gen.st.push(genStObj, l*2)
 	return nil
 }
@@ -426,11 +392,9 @@ func (gen *Generator) StartUserMarshalled(name string) error {
 	if err := gen.checkState(false, 1+1+fixnumMaxBytes+len(name)); err != nil {
 		return err
 	}
-	gen.buf[gen.bufn] = typeUsrMarshal
-	gen.bufn++
 
+	gen.buf = append(gen.buf, typeUsrMarshal)
 	gen.writeSym(name)
-
 	gen.st.push(genStUsrMarsh, 1)
 	return nil
 }
@@ -455,15 +419,11 @@ func (gen *Generator) UserDefinedObject(name, data string) error {
 	if err := gen.checkState(false, 1+fixnumMaxBytes+len(name)+fixnumMaxBytes+len(data)); err != nil {
 		return err
 	}
-	gen.buf[gen.bufn] = typeUsrDef
-	gen.bufn++
 
+	gen.buf = append(gen.buf, typeUsrDef)
 	gen.writeSym(name)
-
 	gen.encodeLong(int64(len(data)))
-	copy(gen.buf[gen.bufn:], data)
-	gen.bufn += len(data)
-
+	gen.buf = append(gen.buf, data...)
 	return gen.writeAdv()
 }
 
@@ -475,12 +435,9 @@ func (gen *Generator) Regexp(expr string, flags byte) error {
 		return err
 	}
 
-	gen.buf[gen.bufn] = typeRegExp
-	gen.bufn++
+	gen.buf = append(gen.buf, typeRegExp)
 	gen.writeString(expr)
-	gen.buf[gen.bufn] = flags
-	gen.bufn++
-
+	gen.buf = append(gen.buf, flags)
 	return gen.writeAdv()
 }
 
@@ -490,8 +447,7 @@ func (gen *Generator) StartStruct(name string, l int) error {
 	if err := gen.checkState(false, 1+1+fixnumMaxBytes+len(name)+fixnumMaxBytes); err != nil {
 		return err
 	}
-	gen.buf[gen.bufn] = typeStruct
-	gen.bufn++
+	gen.buf = append(gen.buf, typeStruct)
 
 	gen.writeSym(name)
 
@@ -536,14 +492,6 @@ func (gen *Generator) checkState(isSym bool, sz int) error {
 		}
 	}
 
-	if len(gen.buf) < gen.bufn+sz {
-		newBuf := make([]byte, gen.bufn+sz)
-		if gen.bufn > 0 {
-			copy(newBuf, gen.buf)
-		}
-		gen.buf = newBuf
-	}
-
 	return nil
 }
 
@@ -559,12 +507,12 @@ func (gen *Generator) writeAdv() error {
 
 	// If we've just finished writing out the last value, then we make sure to flush anything remaining.
 	// Otherwise, we let things accumulate in our small buffer between calls to reduce the number of writes.
-	if gen.bufn > maxBufferSize || (gen.bufn > 0 && gen.st.cur.pos == gen.st.cur.cnt && gen.st.sz == 1) {
-		if _, err := gen.w.Write(gen.buf[:gen.bufn]); err != nil {
+	if l := len(gen.buf); l > maxBufferSize || (l > 0 && gen.st.cur.pos == gen.st.cur.cnt && gen.st.sz == 1) {
+		if _, err := gen.w.Write(gen.buf); err != nil {
 			return err
 		}
-		gen.c += gen.bufn
-		gen.bufn = 0
+		gen.c += l
+		gen.buf = gen.buf[:0]
 	}
 
 	return nil
@@ -572,30 +520,27 @@ func (gen *Generator) writeAdv() error {
 
 func (gen *Generator) encodeLong(n int64) {
 	if n == 0 {
-		gen.buf[gen.bufn] = 0
-		gen.bufn++
+		gen.buf = append(gen.buf, 0)
 		return
 	} else if 0 < n && n < 0x7B {
-		gen.buf[gen.bufn] = byte(n + 5)
-		gen.bufn++
+		gen.buf = append(gen.buf, byte(n+5))
 		return
 	} else if -0x7C < n && n < 0 {
-		gen.buf[gen.bufn] = byte((n - 5) & 0xFF)
-		gen.bufn++
+		gen.buf = append(gen.buf, byte((n-5)&0xFF))
 		return
 	}
 
+	bufn := len(gen.buf)
+	gen.buf = append(gen.buf, 0)
 	for i := 1; i < 5; i++ {
-		gen.buf[gen.bufn+i] = byte(n & 0xFF)
+		gen.buf = append(gen.buf, byte(n&0xFF))
 		n = n >> 8
 		if n == 0 {
-			gen.buf[gen.bufn] = byte(i)
-			gen.bufn += i + 1
+			gen.buf[bufn] = byte(i)
 			return
 		}
 		if n == -1 {
-			gen.buf[gen.bufn] = byte(-i)
-			gen.bufn += i + 1
+			gen.buf[bufn] = byte(-i)
 			return
 		}
 	}
