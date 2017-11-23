@@ -22,7 +22,8 @@ var ErrGeneratorOverflow = fmt.Errorf("Write past end of bounded array/hash/ivar
 var ErrNonSymbolValue = fmt.Errorf("Non Symbol value written when Symbol expected")
 
 const (
-	genStateGrowSize = 8 // Initial size + amount to grow state stack by
+	maxBufferSize    = 512 // Flush buffer when it exceeds this threshold
+	genStateGrowSize = 8   // Initial size + amount to grow state stack by
 	symTblGrowSize   = 8
 )
 
@@ -558,7 +559,7 @@ func (gen *Generator) writeAdv() error {
 
 	// If we've just finished writing out the last value, then we make sure to flush anything remaining.
 	// Otherwise, we let things accumulate in our small buffer between calls to reduce the number of writes.
-	if gen.bufn > 0 && gen.st.cur.pos == gen.st.cur.cnt && gen.st.sz == 1 {
+	if gen.bufn > maxBufferSize || (gen.bufn > 0 && gen.st.cur.pos == gen.st.cur.cnt && gen.st.sz == 1) {
 		if _, err := gen.w.Write(gen.buf[:gen.bufn]); err != nil {
 			return err
 		}
