@@ -241,11 +241,11 @@ func BenchmarkGenLargeArray(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		gen.Reset(nil)
 
-		if err := gen.StartArray(10); err != nil {
+		if err := gen.StartArray(50000); err != nil {
 			b.Fatal(err)
 		}
-		for i := 0; i < 10; i++ {
-			if err := gen.Nil(); err != nil {
+		for i := 0; i < 50000; i++ {
+			if err := gen.String("somebytes"); err != nil {
 				b.Fatal(err)
 			}
 		}
